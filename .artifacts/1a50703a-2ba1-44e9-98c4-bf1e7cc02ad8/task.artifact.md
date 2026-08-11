@@ -1,0 +1,8 @@
+- [x] Update `AndroidManifest.xml` (Permissions & Impeller)
+- [x] Replace `withValues` with `withOpacity` across the project
+- [x] Robust navigation check in `SplashScreen`
+- [x] Center Splash Screen layout for all devices
+- [x] Switch AI model to `gemini-2.5-flash`
+- [x] Update app icon configuration to `app-logo.png`
+- [x] Run icon generation tool
+- [x] Update Splash Screen to use `app-logo.png`
