@@ -1,37 +1,44 @@
-# Implementation Plan - 2026 AI Model & Logo Update
+# Implementation Plan - Final Polish & Verification
 
-I have updated the app to use the stable 2026 AI model and will now ensure the app uses the latest logo you provided.
+This plan finalizes all remaining tasks in the `task.artifact.md`, specifically focusing on speed benchmarks, parallel status updates, and diagnostic robustness.
 
 ## User Review Required
 
-> [!IMPORTANT]
-> **Action Required**: I cannot see a file named `app-logo.png` in your project yet.
-> 1. Please save the image you just uploaded as `assets/images/app-logo.png`.
-> 2. Once you do that, I will update the app configuration to use that exact filename.
->
-> **API Key Reminder**: Please ensure your key in `.env` starts with `AIzaSy`. Your current `AQ.` key will cause "Not Found" errors.
+> [!NOTE]
+> **Parallel Status Tracking**: I will implement a "Parallel Status Tracker" in the scan service. Instead of the progress bar hanging on "Analyzing...", you will see it update in real-time as each AI component (AI detection, Writing Quality, Plagiarism) finishes its task.
 
-## Proposed Changes
+## 1. Speed & Diagnostics (The "Speed Checking" Goal)
 
-### [AI Constants](file:///D:/Plagiarism_detection_mobile_app/lib/core/constants/app_constants.dart)
+### Stage 1: Parallel Progress Tracking
+- **Flutter**: Update `ScanService` to call `onStepChanged` independently as each AI future completes.
+- **Flutter**: Add a `Stopwatch` to accurately log the end-to-end performance of the detection engine.
 
-#### [MODIFY] [app_constants.dart](file:///D:/Plagiarism_detection_mobile_app/lib/core/constants/app_constants.dart) [DONE]
-- Changed `geminiModel` to `gemini-2.5-flash` to fix retirement errors.
+### Stage 2: Robust Timeouts
+- **Flutter**: Standardize all Gemini AI calls to a **25-second timeout**. This prevents the "Infinite Loading" hang if the server is under heavy load.
 
-### [App Configuration](file:///D:/Plagiarism_detection_mobile_app/pubspec.yaml)
+## 2. Accuracy & Reliability (The "Perfect Analysis" Goal)
 
-#### [MODIFY] [pubspec.yaml](file:///D:/Plagiarism_detection_mobile_app/pubspec.yaml)
-- Update `flutter_launcher_icons` to use `assets/images/app-logo.png`.
+### Stage 3: Batch Safety Limits
+- **DetectionEngine**: Add a check to ensure we never exceed Gemini's **100-content batch limit** for embeddings (though we currently chunk at a much lower rate, this is critical for production stability).
 
-### [Splash Screen](file:///D:/Plagiarism_detection_mobile_app/lib/features/auth/screens/splash_screen.dart)
+### Stage 4: Auditor v3 Prompt Finalization
+- **Edge Function**: Perform a final sweep of the `gemini-reasoning` prompt to ensure the "No Hallucination" rule is the highest priority.
 
-#### [MODIFY] [splash_screen.dart](file:///D:/Plagiarism_detection_mobile_app/lib/features/auth/screens/splash_screen.dart)
-- Update the image path from `app_logo.png` to `app-logo.png`.
+## 3. Proposed Changes
 
-## Verification Plan
+### [MODIFY] [scan_provider.dart](file:///D:/Plagiarism_detection_mobile_app/lib/features/scan/providers/scan_provider.dart)
+- Implement `Future.wait` with individual `.then()` status updates.
+- Add performance logging.
 
-### Manual Verification
-1. Verify the file `assets/images/app-logo.png` exists.
-2. Run `dart run flutter_launcher_icons` to update the app icon.
-3. Run the app and verify the splash screen shows the new logo and is correctly aligned.
-4. Run a scan and verify it uses `gemini-2.5-flash`.
+### [MODIFY] [detection_engine.dart](file:///D:/Plagiarism_detection_mobile_app/lib/core/services/detection_engine.dart)
+- Add batch size safeguards.
+- Enhance overlap calculation for more clinical "Verified" status.
+
+### [MODIFY] [rewrite_screen.dart](file:///D:/Plagiarism_detection_mobile_app/lib/features/coach/screens/rewrite_screen.dart)
+- Add a post-fix navigation hint: "Re-scan to update your score."
+
+## 4. Final Verification Checklist
+- [ ] Scan speed < 12 seconds for standard document.
+- [ ] Zero-wait transition from 100% progress to Results.
+- [ ] "Apply Fix" updates Supabase successfully.
+- [ ] Paraphrased web content is correctly identified (Recalibrated keyword search).

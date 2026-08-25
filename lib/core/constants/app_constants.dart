@@ -7,9 +7,6 @@ class AppConstants {
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56YXdjZWJ1bmZid2hyd2Z5cmp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyODUzNDksImV4cCI6MjEwMDg2MTM0OX0.Ew3eJIyvdOHMTWttpEXqFif5TqOXSkWKi4PPybZobrM';
   static const authRedirectUrl = 'academiccoach://auth-callback';
 
-  // Gemini — populated from .env at app startup
-  static String geminiApiKey = '';
-
   // Hive boxes
   static const cacheBoxName = 'awc_cache';
   static const draftsBoxName = 'awc_drafts';
@@ -19,9 +16,6 @@ class AppConstants {
   static const avatarsBucket = 'avatars';
   static const reportsBucket = 'reports';
   static const ocrImagesBucket = 'ocr-images';
-
-  // Gemini model
-  static const geminiModel = 'gemini-2.5-flash';
 
   // Plagiarism thresholds
   static const lowRiskThreshold = 15.0;

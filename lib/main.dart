@@ -53,20 +53,10 @@ void main() async {
     if (env['SUPABASE_ANON_KEY']?.isNotEmpty == true) {
       AppConstants.supabaseAnonKey = env['SUPABASE_ANON_KEY']!;
     }
-    if (env['GEMINI_API_KEY']?.isNotEmpty == true &&
-        env['GEMINI_API_KEY'] != 'your_gemini_api_key_here') {
-      AppConstants.geminiApiKey = env['GEMINI_API_KEY']!;
-    }
     print('Main: .env loaded');
   } catch (e) {
     print('Main: .env error: $e');
     // .env missing or malformed — fall back to compile-time defaults
-  }
-
-  // Initialize Gemini if a valid key was found
-  if (AppConstants.geminiApiKey.isNotEmpty) {
-    print('Main: Initializing Gemini');
-    GeminiService.instance.initialize(AppConstants.geminiApiKey);
   }
 
   // Initialize Hive for local caching

@@ -9,6 +9,7 @@ class FlaggedSectionCard extends StatelessWidget {
   final String sourceName;
   final String? sourceUrl;
   final int matchPercentage;
+  final bool isVerified;
   final VoidCallback onFixTap;
 
   const FlaggedSectionCard({
@@ -18,6 +19,7 @@ class FlaggedSectionCard extends StatelessWidget {
     required this.sourceName,
     this.sourceUrl,
     required this.matchPercentage,
+    this.isVerified = false,
     required this.onFixTap,
   });
 
@@ -53,6 +55,11 @@ class FlaggedSectionCard extends StatelessWidget {
         accentColor = AppColors.secondary;
         icon = Icons.format_quote_rounded;
         typeLabel = 'Missing Citation';
+        break;
+      case PlagiarismType.webDiscovery:
+        accentColor = AppColors.primary;
+        icon = Icons.public_rounded;
+        typeLabel = 'Web Match';
         break;
       default:
         accentColor = AppColors.primary;
@@ -94,6 +101,24 @@ class FlaggedSectionCard extends StatelessWidget {
                   typeLabel,
                   style: AppTypography.labelLarge.copyWith(color: accentColor),
                 ),
+                if (isVerified) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.riskSafe,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'VERIFIED',
+                      style: AppTypography.labelSmall.copyWith(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

@@ -5,6 +5,7 @@ enum PlagiarismType {
   missingCitation,
   paraphrased,
   aiRewritten,
+  webDiscovery, // Match found on the live web
 }
 
 enum RiskLevel { safe, low, medium, high, critical }
@@ -98,6 +99,8 @@ class FlaggedSection {
         return PlagiarismType.paraphrased;
       case 'ai_rewritten':
         return PlagiarismType.aiRewritten;
+      case 'webDiscovery':
+        return PlagiarismType.webDiscovery;
       default:
         return PlagiarismType.exactCopy;
     }
@@ -134,6 +137,8 @@ class FlaggedSection {
         return 'Paraphrased Content';
       case PlagiarismType.aiRewritten:
         return 'AI-Rewritten Content';
+      case PlagiarismType.webDiscovery:
+        return 'Web Discovery';
     }
   }
 

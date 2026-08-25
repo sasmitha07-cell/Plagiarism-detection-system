@@ -48,7 +48,7 @@ class ScanResultScreen extends ConsumerWidget {
     String title,
   ) {
     // Use DB data when available, otherwise fall back to mock scores
-    final content = extraData?['content'] as String? ?? '';
+    final content = result?.content ?? extraData?['content'] as String? ?? '';
     final hash = content.hashCode.abs();
 
     final double plagiarismScore =
@@ -275,14 +275,16 @@ class ScanResultScreen extends ConsumerWidget {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: FlaggedSectionCard(
-                      type: _mapPlagiarismType(f.plagiarismType),
+                      type: f.signals.isNotEmpty ? f.signals.first : PlagiarismType.semanticSimilarity,
                       textSnippet: f.flaggedText.length > 120
                           ? '${f.flaggedText.substring(0, 120)}…'
                           : f.flaggedText,
                       sourceName: f.sourceTitle ?? 'Detected via AI Analysis',
                       sourceUrl: f.sourceUrl,
                       matchPercentage: f.similarityScore,
-                      onFixTap: () => context.push('/coach'),
+                      isVerified: f.signals.contains(PlagiarismType.exactCopy) || 
+                                 (f.signals.contains(PlagiarismType.webDiscovery) && f.similarityScore > 60),
+                      onFixTap: () => context.push('/coach', extra: scanId),
                     )
                         .animate()
                         .fadeIn(

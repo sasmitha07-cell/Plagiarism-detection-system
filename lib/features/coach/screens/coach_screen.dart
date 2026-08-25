@@ -1,36 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/models/flagged_section.dart';
+import '../../scan/providers/scan_provider.dart';
 
-class CoachScreen extends StatelessWidget {
-  const CoachScreen({super.key});
+class CoachScreen extends ConsumerWidget {
+  final String? scanId;
+  const CoachScreen({super.key, this.scanId});
 
   @override
-  Widget build(BuildContext context) {
-    // Mock list of issues for UI purposes
-    final List<Map<String, dynamic>> issues = [
-      {
-        'title': 'High Semantic Similarity',
-        'type': PlagiarismType.semanticSimilarity,
-        'snippet': 'The rapid development of machine learning algorithms has significantly altered the landscape of artificial intelligence research...',
-        'suggestion': 'Try to express this idea using your own unique perspective rather than relying on common phrasings.',
-      },
-      {
-        'title': 'AI Generated Signature Detected',
-        'type': PlagiarismType.aiRewritten,
-        'snippet': 'It is crucial to recognize that the multifaceted nature of this problem requires a holistic approach...',
-        'suggestion': 'This sentence lacks personal voice and uses typical LLM vocabulary. Rewrite to sound more natural.',
-      },
-      {
-        'title': 'Missing Citation',
-        'type': PlagiarismType.missingCitation,
-        'snippet': 'Studies show that 78% of students struggle with academic writing formats.',
-        'suggestion': 'You need to cite the specific study that provided this statistic.',
-      },
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    // If no scanId is provided, show a message or last scan
+    if (scanId == null) {
+        return const Scaffold(body: Center(child: Text('No active scan results found.')));
+    }
+
+    final scanResultAsync = ref.watch(scanResultProvider(scanId!));
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -38,49 +26,90 @@ class CoachScreen extends StatelessWidget {
         title: const Text('Writing Coach'),
         backgroundColor: AppColors.background,
       ),
-      body: SafeArea(
-        child: ListView.separated(
-          padding: const EdgeInsets.all(24),
-          itemCount: issues.length + 1,
-          separatorBuilder: (context, index) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Needs Improvement',
-                    style: AppTypography.headlineSmall.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ).animate().fadeIn(delay: 100.ms).slideY(begin: 0.2),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Review the flagged issues below and use our AI assistant to rewrite them.',
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ).animate().fadeIn(delay: 150.ms),
-                  const SizedBox(height: 24),
-                ],
-              );
-            }
+      body: scanResultAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error loading results: $e')),
+        data: (result) {
+          if (result == null || result.flaggedSections.isEmpty) {
+            return _buildEmptyState(context);
+          }
 
-            final issue = issues[index - 1];
-            return _IssueCard(
-              title: issue['title'],
-              type: issue['type'],
-              snippet: issue['snippet'],
-              suggestion: issue['suggestion'],
-              onRewrite: () {
-                context.push('/coach/rewrite', extra: {
-                  'text': issue['snippet'],
-                  'type': issue['type'],
-                });
+          final issues = result.flaggedSections;
+
+          return SafeArea(
+            child: ListView.separated(
+              padding: const EdgeInsets.all(24),
+              itemCount: issues.length + 1,
+              separatorBuilder: (context, index) => const SizedBox(height: 16),
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Needs Improvement',
+                        style: AppTypography.headlineSmall.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ).animate().fadeIn(delay: 100.ms).slideY(begin: 0.2),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Review the flagged issues below and use our AI assistant to rewrite them.',
+                        style: AppTypography.bodyMedium.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ).animate().fadeIn(delay: 150.ms),
+                      const SizedBox(height: 24),
+                    ],
+                  );
+                }
+
+                final issue = issues[index - 1];
+                final isVerified = issue.signals.contains(PlagiarismType.exactCopy) || 
+                                 (issue.signals.contains(PlagiarismType.webDiscovery) && issue.similarityScore > 60);
+
+                return _IssueCard(
+                  title: _getIssueTitle(issue),
+                  type: issue.signals.isNotEmpty ? issue.signals.first : PlagiarismType.semanticSimilarity,
+                  snippet: issue.flaggedText,
+                  suggestion: issue.suggestedAction ?? 'Consider rephrasing this section.',
+                  isVerified: isVerified,
+                  onRewrite: () {
+                    context.push('/coach/rewrite', extra: {
+                      'text': issue.flaggedText,
+                      'scanId': scanId,
+                      'documentId': result.documentId,
+                      'startPos': issue.startPosition,
+                      'endPos': issue.endPosition,
+                      'type': issue.signals.isNotEmpty ? issue.signals.first : PlagiarismType.semanticSimilarity,
+                    });
+                  },
+                ).animate().fadeIn(delay: Duration(milliseconds: 200 + (index * 100))).slideY(begin: 0.1);
               },
-            ).animate().fadeIn(delay: Duration(milliseconds: 200 + (index * 100))).slideY(begin: 0.1);
-          },
-        ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  String _getIssueTitle(FlaggedSectionData issue) {
+    if (issue.signals.contains(PlagiarismType.exactCopy)) return 'Exact Match Detected';
+    if (issue.signals.contains(PlagiarismType.webDiscovery)) return 'Web Match Found';
+    return 'High Semantic Similarity';
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle_outline_rounded, size: 64, color: AppColors.riskSafe),
+          const SizedBox(height: 16),
+          Text('All Good!', style: AppTypography.headlineSmall),
+          const SizedBox(height: 8),
+          Text('No writing issues detected in this document.', style: AppTypography.bodyMedium),
+        ],
       ),
     );
   }
@@ -91,6 +120,7 @@ class _IssueCard extends StatelessWidget {
   final PlagiarismType type;
   final String snippet;
   final String suggestion;
+  final bool isVerified;
   final VoidCallback onRewrite;
 
   const _IssueCard({
@@ -98,6 +128,7 @@ class _IssueCard extends StatelessWidget {
     required this.type,
     required this.snippet,
     required this.suggestion,
+    this.isVerified = false,
     required this.onRewrite,
   });
 
@@ -156,6 +187,24 @@ class _IssueCard extends StatelessWidget {
                     style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
                   ),
                 ),
+                if (isVerified) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.riskSafe,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'VERIFIED',
+                      style: AppTypography.labelSmall.copyWith(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

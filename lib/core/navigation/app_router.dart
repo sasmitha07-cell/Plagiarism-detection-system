@@ -187,7 +187,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/coach',
             name: 'coach',
-            builder: (context, state) => const CoachScreen(),
+            builder: (context, state) => CoachScreen(scanId: state.extra as String?),
             routes: [
               GoRoute(
                 path: 'rewrite',
@@ -197,6 +197,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   return RewriteScreen(
                     originalText: extra?['text'] ?? '',
                     scanId: extra?['scanId'],
+                    documentId: extra?['documentId'],
+                    startPos: extra?['startPos'],
+                    endPos: extra?['endPos'],
                   );
                 },
               ),

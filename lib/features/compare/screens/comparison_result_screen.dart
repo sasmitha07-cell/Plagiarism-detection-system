@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/services/gemini_service.dart';
+import '../../../core/services/detection_engine.dart';
 import '../../../core/constants/app_constants.dart';
 
 // ─── Provider ───────────────────────────────────────────────────────────────
@@ -15,12 +16,18 @@ final _comparisonResultProvider = FutureProvider.family<
   final titleA = args['titleA'] ?? 'Document A';
   final titleB = args['titleB'] ?? 'Document B';
 
-  if (AppConstants.geminiApiKey.isNotEmpty) {
-    return GeminiService.instance
+  // 1. Run Evidence-Based Detection (Hybrid)
+  // We pass textB so ExactMatcher can run locally against it.
+  final detectionResult = await DetectionEngine.instance.analyzeDocument(
+    text: textA,
+    compareWithDocumentId: args['docBId'], 
+    compareWithDocumentText: textB,
+  );
+  // Note: evidence and chunks (detectionResult.$1, $2) could be used to enhance this view later.
+
+  // 2. Fallback to direct A vs B logic if IDs are missing
+  return await GeminiService.instance
         .compareDocuments(textA, textB, titleA, titleB);
-  }
-  // Deterministic mock based on text content similarity
-  return _mockComparison(textA, textB);
 });
 
 Map<String, dynamic> _mockComparison(String a, String b) {

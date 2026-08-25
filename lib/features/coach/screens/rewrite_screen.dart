@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../../scan/providers/scan_provider.dart';
+import '../../../core/services/gemini_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../core/widgets/gradient_button.dart';
@@ -11,11 +13,17 @@ import '../../../core/widgets/app_snackbar.dart';
 class RewriteScreen extends ConsumerStatefulWidget {
   final String originalText;
   final String? scanId;
+  final String? documentId;
+  final int? startPos;
+  final int? endPos;
 
   const RewriteScreen({
     super.key,
     required this.originalText,
     this.scanId,
+    this.documentId,
+    this.startPos,
+    this.endPos,
   });
 
   @override
@@ -35,31 +43,33 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
   ];
 
   Future<void> _generateRewrite() async {
-    setState(() => _isGenerating = true);
-    
-    // Simulate API call to Gemini
-    await Future.delayed(const Duration(seconds: 2));
-    
-    if (!mounted) return;
-    
     setState(() {
-      _isGenerating = false;
-      // Mock generated text based on tone
-      switch (_selectedToneIndex) {
-        case 0:
-          _suggestedText = 'The proliferation of machine learning paradigms has fundamentally transformed the methodological approaches within artificial intelligence studies.';
-          break;
-        case 1:
-          _suggestedText = 'Machine learning has changed how we do AI research.';
-          break;
-        case 2:
-          _suggestedText = 'It is undeniable that machine learning algorithms are revolutionizing the very foundation of artificial intelligence research.';
-          break;
-        case 3:
-          _suggestedText = 'Machine learning algorithms have significantly changed AI research.';
-          break;
-      }
+      _isGenerating = true;
+      _suggestedText = null;
     });
+    
+    try {
+      final tone = _tones[_selectedToneIndex]['label'] as String;
+      final result = await GeminiService.instance.rewriteText(
+        text: widget.originalText,
+        style: tone,
+      );
+      
+      if (!mounted) return;
+      
+      setState(() {
+        _isGenerating = false;
+        if (result['rewritten_text'] != null) {
+          _suggestedText = result['rewritten_text'] as String?;
+        } else {
+          AppSnackbar.showError(context, result['error'] ?? 'AI failed to generate a rewrite. Please try again.');
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isGenerating = false);
+      AppSnackbar.showError(context, 'Connection error. Please check your internet.');
+    }
   }
 
   void _copyToClipboard(String text) {
@@ -251,12 +261,32 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
                   ],
                 ),
                 child: GradientButton(
-                  text: 'Apply Fix & Return',
+                  text: 'Apply Fix & Save',
                   icon: Icons.check_circle_outline_rounded,
-                  onPressed: () {
-                    // Simulate applying fix
-                    AppSnackbar.showSuccess(context, 'Text updated successfully');
-                    context.pop();
+                  onPressed: () async {
+                    if (widget.documentId != null && 
+                        widget.startPos != null && 
+                        widget.endPos != null && 
+                        _suggestedText != null) {
+                      
+                      final success = await ScanService.instance.applyFix(
+                        documentId: widget.documentId!,
+                        startPos: widget.startPos!,
+                        endPos: widget.endPos!,
+                        oldText: widget.originalText,
+                        newText: _suggestedText!,
+                      );
+
+                      if (success && mounted) {
+                        AppSnackbar.showSuccess(context, 'Document updated! Run a new scan to see your improved score.');
+                        context.pop();
+                      } else if (mounted) {
+                        AppSnackbar.showError(context, 'Failed to update document');
+                      }
+                    } else {
+                      AppSnackbar.showSuccess(context, 'Text copied to clipboard');
+                      context.pop();
+                    }
                   },
                 ),
               ).animate().fadeIn().slideY(begin: 0.2),
