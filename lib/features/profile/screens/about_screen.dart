@@ -39,7 +39,7 @@ class AboutScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(28),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.primary.withOpacity(0.3),
+                                color: AppColors.primary.withValues(alpha: 0.25),
                                 blurRadius: 30,
                                 spreadRadius: 5,
                                 offset: const Offset(0, 8),
@@ -273,7 +273,7 @@ class _FeatureTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: feature.color.withOpacity(0.1),
+              color: feature.color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(feature.icon, color: feature.color, size: 22),

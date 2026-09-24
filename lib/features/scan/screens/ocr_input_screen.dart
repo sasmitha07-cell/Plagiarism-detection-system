@@ -83,9 +83,9 @@ class _OcrInputScreenState extends ConsumerState<OcrInputScreen> {
   void _startAnalysis() {
     if (_extractedText == null || _extractedText!.trim().isEmpty) return;
 
-    final mockScanId = 'scan_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionScanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
 
-    context.go('/scan/processing/$mockScanId', extra: {
+    context.go('/scan/processing/$sessionScanId', extra: {
       'title': 'Scanned Image',
       'content': _extractedText,
       'type': 'image',
@@ -116,7 +116,7 @@ class _OcrInputScreenState extends ConsumerState<OcrInputScreen> {
                         child: Icon(
                           Icons.document_scanner_rounded,
                           size: 100,
-                          color: AppColors.secondary.withOpacity(0.2),
+                          color: AppColors.secondary.withValues(alpha: 0.2),
                         ),
                       ).animate().scale(delay: 200.ms, curve: Curves.easeOutBack),
                       const SizedBox(height: 32),

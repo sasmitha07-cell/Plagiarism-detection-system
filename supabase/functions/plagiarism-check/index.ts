@@ -1,10 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 
-console.log("Plagiarism Check Edge Function Started")
+console.log("Plagiarism Check Router Edge Function Initialized")
 
 serve(async (req) => {
-  // CORS headers
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: {
@@ -16,54 +14,61 @@ serve(async (req) => {
   }
 
   try {
-    const { text, type } = await req.json()
-    
-    if (!text) {
+    const { text, evidence = [] } = await req.json()
+
+    if (!text || text.trim().length === 0) {
       return new Response(JSON.stringify({ error: 'Text content is required' }), {
         headers: { 'Content-Type': 'application/json' },
         status: 400,
       })
     }
 
-    // Mock analysis logic for plagiarism check
-    // In production, this would call Copyleaks, Turnitin, or OpenAI APIs
+    const words = text.trim().split(/\s+/).filter((w: string) => w.length > 0)
     
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    // Transparent deterministic aggregation over submitted evidence
+    let exactCount = 0
+    let semanticCount = 0
+    let webCount = 0
+    
+    for (const ev of evidence) {
+      if (ev.signals && ev.signals.includes('exactCopy')) exactCount++
+      if (ev.signals && ev.signals.includes('semanticSimilarity')) semanticCount++
+      if (ev.signals && ev.signals.includes('webDiscovery')) webCount++
+    }
 
-    // Mock response payload
+    const totalEv = Math.max(1, evidence.length)
+    const exactScore = Math.min(100, Math.round((exactCount / totalEv) * 100))
+    const semanticScore = Math.min(100, Math.round((semanticCount / totalEv) * 100))
+    const webScore = Math.min(100, Math.round((webCount / totalEv) * 100))
+    const overall = Math.min(100, Math.round((exactScore * 0.5) + (webScore * 0.3) + (semanticScore * 0.2)))
+
     const result = {
-      similarity_score: 12.5,
-      writing_score: 88.0,
-      ai_probability: 5.2,
-      word_count: text.split(/\s+/).length,
-      flagged_sections: [
-        {
-          text_segment: "In conclusion, the results demonstrate that",
-          similarity: 100,
-          source_url: "https://example.com/academic-paper",
-          reason: "Exact match found in public database"
-        }
-      ],
-      grammar_issues: [
-        {
-          text_segment: "The data shows that",
-          suggestion: "The data show that",
-          reason: "Subject-verb agreement for plural noun 'data'"
-        }
-      ]
+      similarity_score: overall,
+      exact_match_score: exactScore,
+      semantic_score: semanticScore,
+      web_score: webScore,
+      word_count: words.length,
+      evidence_count: evidence.length,
+      flagged_sections: evidence.map((e: any) => ({
+        text_segment: e.submittedText || '',
+        similarity: Math.round((e.exactSimilarity || e.webSimilarity || e.semanticSimilarity || 0) * 100),
+        source_url: e.sourceUrl || null,
+        source_title: e.sourceTitle || 'Database / Web Source',
+        reason: e.reason || 'Similarity flagged by multi-layer detection pipeline'
+      })),
+      status: 'success'
     }
 
     return new Response(JSON.stringify(result), {
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
       status: 200,
     })
-    
+
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: (error as Error).message }), {
       headers: { 'Content-Type': 'application/json' },
       status: 500,
     })

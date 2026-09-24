@@ -8,6 +8,7 @@ class ScanResult {
   final String id;
   final String userId;
   final String documentId;
+  final String title;
   final ScanStatus status;
 
   // Plagiarism scores
@@ -50,6 +51,7 @@ class ScanResult {
     required this.id,
     required this.userId,
     required this.documentId,
+    this.title = 'Document Scan',
     this.status = ScanStatus.pending,
     this.overallSimilarityScore = 0,
     this.exactMatchScore = 0,
@@ -79,22 +81,33 @@ class ScanResult {
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
+    final docMap = json['documents'] is Map<String, dynamic>
+        ? json['documents'] as Map<String, dynamic>
+        : null;
+    final docTitle = docMap?['title'] as String?;
+    final docContent = docMap?['content'] as String?;
+
     return ScanResult(
-      id: json['id'] as String,
-      userId: json['user_id'] as String,
-      documentId: json['document_id'] as String,
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString() ?? '',
+      documentId: json['document_id']?.toString() ?? '',
+      title: json['title'] as String? ?? docTitle ?? 'Document Scan',
       status: _parseStatus(json['status'] as String? ?? 'pending'),
       overallSimilarityScore:
-          (json['overall_similarity_score'] as num?)?.toDouble() ?? 0,
-      exactMatchScore: (json['exact_match_score'] as num?)?.toDouble() ?? 0,
+          (json['overall_similarity_score'] as num?)?.toDouble() ?? 0.0,
+      exactMatchScore:
+          (json['exact_match_score'] as num?)?.toDouble() ?? 0.0,
       semanticSimilarityScore:
-          (json['semantic_similarity_score'] as num?)?.toDouble() ?? 0,
-      paraphraseScore: (json['paraphrase_score'] as num?)?.toDouble() ?? 0,
-      aiGeneratedScore: (json['ai_generated_score'] as num?)?.toDouble() ?? 0,
+          (json['semantic_similarity_score'] as num?)?.toDouble() ?? 0.0,
+      paraphraseScore:
+          (json['paraphrase_score'] as num?)?.toDouble() ?? 0.0,
+      aiGeneratedScore: (json['ai_generated_score'] as num?)?.toDouble() ??
+          (json['ai_score'] as num?)?.toDouble() ??
+          0.0,
       humanWrittenScore:
-          (json['human_written_score'] as num?)?.toDouble() ?? 100,
+          (json['human_written_score'] as num?)?.toDouble() ?? 100.0,
       aiDetectionConfidence:
-          (json['ai_detection_confidence'] as num?)?.toDouble() ?? 0,
+          (json['ai_detection_confidence'] as num?)?.toDouble() ?? 0.0,
       contentType: _parseContentType(json['content_type'] as String? ?? 'human'),
       grammarScore: (json['grammar_score'] as num?)?.toDouble(),
       readabilityScore: (json['readability_score'] as num?)?.toDouble(),
@@ -102,26 +115,30 @@ class ScanResult {
       vocabularyScore: (json['vocabulary_score'] as num?)?.toDouble(),
       structureScore: (json['structure_score'] as num?)?.toDouble(),
       overallWritingScore:
-          (json['overall_writing_score'] as num?)?.toDouble(),
-      totalFlaggedSections: json['total_flagged_sections'] as int? ?? 0,
-      totalSourcesFound: json['total_sources_found'] as int? ?? 0,
-      sourcesChecked: json['sources_checked'] as int? ?? 0,
-      processingTimeMs: json['processing_time_ms'] as int?,
+          (json['overall_writing_score'] as num?)?.toDouble() ??
+              (json['writing_score'] as num?)?.toDouble() ??
+              75.0,
+      totalFlaggedSections:
+          (json['total_flagged_sections'] as num?)?.toInt() ?? 0,
+      totalSourcesFound: (json['total_sources_found'] as num?)?.toInt() ?? 0,
+      sourcesChecked: (json['sources_checked'] as num?)?.toInt() ?? 0,
+      processingTimeMs: (json['processing_time_ms'] as num?)?.toInt(),
       reportUrl: json['report_url'] as String?,
       executiveSummary: json['executive_summary'] as String?,
       recommendations: (json['recommendations'] as List<dynamic>?)
-              ?.map((e) => e as String)
+              ?.map((e) => e.toString())
               .toList() ??
           [],
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.now(),
       completedAt: json['completed_at'] != null
-          ? DateTime.parse(json['completed_at'] as String)
+          ? DateTime.tryParse(json['completed_at'].toString())
           : null,
     );
   }
 
   static ScanStatus _parseStatus(String s) {
-    switch (s) {
+    switch (s.toLowerCase()) {
       case 'processing':
         return ScanStatus.processing;
       case 'completed':
@@ -134,7 +151,7 @@ class ScanResult {
   }
 
   static ContentType _parseContentType(String s) {
-    switch (s) {
+    switch (s.toLowerCase()) {
       case 'ai':
         return ContentType.ai;
       case 'mixed':
@@ -148,11 +165,22 @@ class ScanResult {
   bool get isProcessing => status == ScanStatus.processing;
   bool get hasFailed => status == ScanStatus.failed;
 
+  double get originalityScore => (100.0 - overallSimilarityScore).clamp(0.0, 100.0);
+
   String get riskLabel {
     if (overallSimilarityScore < 15) return 'Safe';
     if (overallSimilarityScore < 30) return 'Low Risk';
     if (overallSimilarityScore < 50) return 'Medium Risk';
     if (overallSimilarityScore < 70) return 'High Risk';
     return 'Critical';
+  }
+
+  String get timeAgo {
+    final diff = DateTime.now().difference(createdAt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${createdAt.day}/${createdAt.month}/${createdAt.year}';
   }
 }

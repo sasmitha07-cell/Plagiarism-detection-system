@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:developer' as dev;
+import 'dart:math' as math;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../core/constants/app_constants.dart';
 import '../../../core/services/gemini_service.dart';
 import '../../../core/services/detection_engine.dart';
-import '../../../core/services/vector_service.dart';
 import '../../../core/services/document_processor.dart';
 import '../../../core/models/match_evidence.dart';
 import '../../../core/models/flagged_section.dart';
+import '../../../core/services/writing_coach_service.dart';
 import '../../auth/providers/auth_provider.dart';
 
 // ─── Models ────────────────────────────────────────────────────────────────
@@ -28,6 +28,8 @@ class ScanResultData {
   final String status;
   final String? executiveSummary;
   final List<FlaggedSectionData> flaggedSections;
+  final List<Map<String, dynamic>> sources;
+  final Map<String, dynamic>? writingAnalytics;
   final DateTime createdAt;
 
   const ScanResultData({
@@ -44,6 +46,8 @@ class ScanResultData {
     required this.status,
     this.executiveSummary,
     required this.flaggedSections,
+    this.sources = const [],
+    this.writingAnalytics,
     required this.createdAt,
   });
 
@@ -51,22 +55,26 @@ class ScanResultData {
   factory ScanResultData.fromJson(
     Map<String, dynamic> json, {
     List<Map<String, dynamic>> flagged = const [],
+    List<Map<String, dynamic>> sources = const [],
+    Map<String, dynamic>? analytics,
     String? originalContent,
   }) {
     return ScanResultData(
       id: json['id'] as String? ?? '',
       documentId: json['document_id'] as String?,
-      title: json['title'] as String? ?? 'Document',
-      content: originalContent ?? (json['documents'] as Map<String, dynamic>?)?['content'],
+      title: json['title'] as String? ?? (json['documents'] as Map<String, dynamic>?)?['title'] as String? ?? 'Document',
+      content: originalContent ?? (json['documents'] as Map<String, dynamic>?)?['content'] as String?,
       plagiarismScore: (json['overall_similarity_score'] as num?)?.toDouble() ?? 0,
-      aiScore: (json['ai_score'] as num?)?.toDouble() ?? 0,
-      writingScore: (json['writing_score'] as num?)?.toDouble() ?? 0,
+      aiScore: (json['ai_score'] as num?)?.toDouble() ?? (json['ai_generated_score'] as num?)?.toDouble() ?? 0,
+      writingScore: (json['writing_score'] as num?)?.toDouble() ?? (json['overall_writing_score'] as num?)?.toDouble() ?? 75,
       exactMatchScore: (json['exact_match_score'] as num?)?.toDouble() ?? 0,
       semanticScore: (json['semantic_similarity_score'] as num?)?.toDouble() ?? 0,
       paraphraseScore: (json['paraphrase_score'] as num?)?.toDouble() ?? 0,
       status: json['status'] as String? ?? 'pending',
       executiveSummary: json['executive_summary'] as String?,
       flaggedSections: flagged.map(FlaggedSectionData.fromJson).toList(),
+      sources: sources,
+      writingAnalytics: analytics,
       createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ??
           DateTime.now(),
     );
@@ -118,7 +126,7 @@ class FlaggedSectionData {
       sourceTitle: j['source_title'] as String?,
       domain: j['domain'] as String?,
       explanation: j['explanation'] as String?,
-      suggested_action: j['suggested_action'] as String?,
+      suggestedAction: j['suggested_action'] as String?,
       startPosition: (j['start_position'] as num?)?.toInt() ?? 0,
       endPosition: (j['end_position'] as num?)?.toInt() ?? 0,
     );
@@ -127,7 +135,7 @@ class FlaggedSectionData {
 
 // ─── Provider ──────────────────────────────────────────────────────────────
 
-/// Fetches a completed scan result (+ flagged sections) from Supabase by scanId.
+/// Fetches a completed scan result (+ flagged sections + sources + analytics) from Supabase by scanId.
 final scanResultProvider =
     FutureProvider.family<ScanResultData?, String>((ref, scanId) async {
   // Check memory cache first (Zero-latency transition)
@@ -142,24 +150,49 @@ final scanResultProvider =
     return null;
   }
 
-  final row = await client
-      .from('scan_results')
-      .select('*, documents(content)')
-      .eq('id', scanId)
-      .maybeSingle();
+  try {
+    final row = await client
+        .from('scan_results')
+        .select('*, documents(title, content, word_count)')
+        .eq('id', scanId)
+        .maybeSingle();
 
-  if (row == null) return null;
+    if (row == null) return null;
 
-  final flaggedRows = await client
-      .from('flagged_sections')
-      .select()
-      .eq('scan_id', scanId)
-      .order('start_position');
+    final flaggedRows = await client
+        .from('flagged_sections')
+        .select()
+        .eq('scan_id', scanId)
+        .order('start_position');
 
-  return ScanResultData.fromJson(
-    row,
-    flagged: List<Map<String, dynamic>>.from(flaggedRows as List),
-  );
+    List<Map<String, dynamic>> sourceRows = [];
+    try {
+      final sData = await client
+          .from('similarity_sources')
+          .select()
+          .eq('scan_id', scanId);
+      sourceRows = List<Map<String, dynamic>>.from(sData as List);
+    } catch (_) {}
+
+    Map<String, dynamic>? analyticsRow;
+    try {
+      analyticsRow = await client
+          .from('writing_analytics')
+          .select()
+          .eq('scan_id', scanId)
+          .maybeSingle();
+    } catch (_) {}
+
+    return ScanResultData.fromJson(
+      row,
+      flagged: List<Map<String, dynamic>>.from(flaggedRows as List),
+      sources: sourceRows,
+      analytics: analyticsRow,
+    );
+  } catch (e) {
+    dev.log('scanResultProvider error: $e');
+    return null;
+  }
 });
 
 // ─── Scan service ──────────────────────────────────────────────────────────
@@ -189,11 +222,12 @@ class ScanService {
         'user_id': userId,
         'title': title,
         'content': content, 
-        'content_type': contentType,
+        'file_type': _mapDocumentType(contentType),
         'word_count': _countWords(content),
-        'status': 'active',
+        'character_count': content.length,
         'file_size_bytes': content.length,
         'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
       }).select('id').single();
       documentId = docRow['id'] as String?;
     } catch (e) {
@@ -204,19 +238,27 @@ class ScanService {
     onStepChanged?.call('Initializing AI engine…');
     late String scanId;
     try {
-      final scanRow = await _client.from('scan_results').insert({
-        'user_id': userId,
-        if (documentId != null) 'document_id': documentId,
-        'title': title,
-        'status': 'processing',
-        'overall_similarity_score': 0,
-        'ai_score': 0,
-        'writing_score': 0,
-        'created_at': DateTime.now().toIso8601String(),
-      }).select('id').single();
-      scanId = scanRow['id'] as String;
+      if (documentId != null) {
+        final scanRow = await _client.from('scan_results').insert({
+          'user_id': userId,
+          'document_id': documentId,
+          'status': 'processing',
+          'overall_similarity_score': 0.0,
+          'exact_match_score': 0.0,
+          'semantic_similarity_score': 0.0,
+          'paraphrase_score': 0.0,
+          'ai_generated_score': 0.0,
+          'human_written_score': 100.0,
+          'overall_writing_score': 0.0,
+          'created_at': DateTime.now().toIso8601String(),
+        }).select('id').single();
+        scanId = scanRow['id'] as String;
+      } else {
+        scanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
+      }
     } catch (e) {
-      scanId = 'demo_${DateTime.now().millisecondsSinceEpoch}';
+      dev.log('ScanService Error: Scan record create failed: $e');
+      scanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
     }
 
     // ── Step 3: Run Hybrid analysis ──────────────────────────────────────
@@ -238,9 +280,19 @@ class ScanService {
       );
       evidence = detectionResult.$1;
 
-      // 2. Parallel AI analysis with Individual Progress Feedback
+      // 2. Parallel AI & Writing Coach analysis
       onStepChanged?.call('Analyzing integrity and quality…');
       
+      // Run comprehensive Writing Coach analysis
+      final writingAnalysis = await WritingCoachService.instance.analyzeText(content);
+      writingResult = {
+        'overall_writing_score': writingAnalysis.overallScore,
+        'grammar_score': writingAnalysis.grammarScore,
+        'readability_score': writingAnalysis.readabilityScore,
+        'academic_tone_score': writingAnalysis.academicToneScore,
+        'vocabulary_score': writingAnalysis.vocabularyScore,
+      };
+
       final limitedContent = content.length > 12000 
           ? '${content.substring(0, 12000)}... [Truncated for speed]' 
           : content;
@@ -249,12 +301,10 @@ class ScanService {
         gemini.detectAiContent(limitedContent).then((res) {
           aiResult = res;
           onStepChanged?.call('AI check complete…');
-        }).catchError((e) => aiResult = _mockAiResult(content)),
-        
-        gemini.analyzeWritingQuality(limitedContent).then((res) {
-          writingResult = res;
-          onStepChanged?.call('Quality analysis complete…');
-        }).catchError((e) => writingResult = _mockWritingResult(content)),
+        }).catchError((err) {
+          dev.log('AI Detection Error (Fallback to Statistical Engine): $err');
+          aiResult = DetectionEngine.instance.estimateAiProbability(content);
+        }),
         
         gemini.analyzeForPlagiarism(
           limitedContent, 
@@ -262,80 +312,178 @@ class ScanService {
         ).then((res) {
           plagiarismResult = res;
           onStepChanged?.call('Plagiarism review complete…');
-        }).catchError((e) {
-          if (evidence.isEmpty) {
-            plagiarismResult = {'overall_similarity_score': 0, 'flagged_sections': []};
-          } else {
-            plagiarismResult = _mockPlagiarismResult(content);
-          }
+        }).catchError((err) {
+          dev.log('Plagiarism Reasoning Note (Fallback to Deterministic): $err');
+          plagiarismResult = DetectionEngine.instance.computeDeterministicReport(
+            text: content,
+            evidence: evidence,
+            chunks: detectionResult.$2,
+          );
         }),
       ]).timeout(const Duration(seconds: 25), onTimeout: () {
-        dev.log('ScanService: AI analysis timed out (25s). Falling back to partial results.');
+        dev.log('ScanService: AI reasoning timeout (25s). Computing deterministic report.');
+        plagiarismResult = DetectionEngine.instance.computeDeterministicReport(
+          text: content,
+          evidence: evidence,
+          chunks: detectionResult.$2,
+        );
+        if (aiResult.isEmpty) {
+          aiResult = DetectionEngine.instance.estimateAiProbability(content);
+        }
         return [];
       });
       
+      if (plagiarismResult.isEmpty ||
+          plagiarismResult['flagged_sections'] == null ||
+          ((plagiarismResult['flagged_sections'] as List).isEmpty && evidence.isNotEmpty)) {
+        plagiarismResult = DetectionEngine.instance.computeDeterministicReport(
+          text: content,
+          evidence: evidence,
+          chunks: detectionResult.$2,
+        );
+      }
+
+      if (aiResult.isEmpty) {
+        aiResult = DetectionEngine.instance.estimateAiProbability(content);
+      }
+
       dev.log('ScanService: Total analysis time: ${stopwatch.elapsed.inSeconds}s');
+    } catch (e) {
       dev.log('ScanService: Pipeline error: $e');
-      plagiarismResult = _mockPlagiarismResult(content);
-      aiResult = _mockAiResult(content);
-      writingResult = _mockWritingResult(content);
+      final chunks = DocumentProcessor.instance.chunkDocument(content);
+      plagiarismResult = DetectionEngine.instance.computeDeterministicReport(
+        text: content,
+        evidence: evidence,
+        chunks: chunks,
+      );
+      aiResult = DetectionEngine.instance.estimateAiProbability(content);
+      try {
+        final wAnalysis = await WritingCoachService.instance.analyzeText(content);
+        writingResult = {
+          'overall_writing_score': wAnalysis.overallScore,
+          'grammar_score': wAnalysis.grammarScore,
+          'readability_score': wAnalysis.readabilityScore,
+          'academic_tone_score': wAnalysis.academicToneScore,
+          'vocabulary_score': wAnalysis.vocabularyScore,
+        };
+      } catch (_) {
+        writingResult = {'overall_writing_score': 80.0};
+      }
     }
 
     onStepChanged?.call('Generating comprehensive report…');
 
-    // ── Step 4: Write flagged sections ─────────────────────────────────────
+    // ── Step 4: Write flagged sections & sources ───────────────────────────
     final flaggedSections =
         plagiarismResult['flagged_sections'] as List<dynamic>? ?? [];
     if (flaggedSections.isNotEmpty && !scanId.startsWith('demo_')) {
       try {
-        await _client.from('flagged_sections').insert(
-          flaggedSections.map((s) {
-            final sec = s as Map<String, dynamic>;
-            final startPos = (sec['start_position'] as num?)?.toInt() ?? 0;
-            final originalEv = evidence.firstWhere(
-              (e) => (e.startOffset - startPos).abs() < 5,
-              orElse: () => MatchEvidence(submittedText: '', signals: [], startOffset: 0, endOffset: 0),
-            );
+        final List<Map<String, dynamic>> sectionRows = [];
+        final Map<String, Map<String, dynamic>> uniqueSources = {};
 
-            return {
-              'scan_id': scanId,
-              'document_id': documentId,
-              'flagged_text': sec['flagged_text'] ?? '',
-              'plagiarism_type': originalEv.signals.isNotEmpty ? originalEv.signals.first.name : 'semantic_similarity',
-              'signals': originalEv.signals.map((s) => s.name).toList(),
-              'risk_level': sec['risk_level'] ?? 'low',
-              'confidence_score': sec['confidence_score'] ?? 0,
-              'similarity_score': sec['similarity_score'] ?? 0,
-              'source_url': sec['source_url'] ?? originalEv.sourceUrl,
-              'source_title': sec['source_title'] ?? originalEv.sourceTitle,
-              'domain': originalEv.domain,
-              'explanation': sec['explanation'] ?? '',
-              'suggested_action': sec['suggested_action'] ?? '',
-              'start_position': startPos,
-              'end_position': (sec['end_position'] as num?)?.toInt() ?? originalEv.endOffset,
+        for (final s in flaggedSections) {
+          final sec = s as Map<String, dynamic>;
+          final startPos = (sec['start_position'] as num?)?.toInt() ?? 0;
+          final originalEv = evidence.firstWhere(
+            (e) => (e.startOffset - startPos).abs() < 10,
+            orElse: () => MatchEvidence(submittedText: sec['flagged_text'] ?? '', signals: [], startOffset: startPos, endOffset: (sec['end_position'] as num?)?.toInt() ?? startPos),
+          );
+
+          final type = originalEv.signals.isNotEmpty ? originalEv.signals.first.name : 'semantic_similarity';
+          final sUrl = sec['source_url'] as String? ?? originalEv.sourceUrl;
+          final sTitle = sec['source_title'] as String? ?? originalEv.sourceTitle;
+
+          sectionRows.add({
+            'scan_id': scanId,
+            'document_id': documentId,
+            'flagged_text': sec['flagged_text'] ?? '',
+            'plagiarism_type': type,
+            'signals': originalEv.signals.map((sig) => sig.name).toList(),
+            'risk_level': sec['risk_level'] ?? 'low',
+            'confidence_score': sec['confidence_score'] ?? 80,
+            'similarity_score': sec['similarity_score'] ?? 75,
+            'source_url': sUrl,
+            'source_title': sTitle,
+            'domain': originalEv.domain,
+            'explanation': sec['explanation'] ?? '',
+            'suggested_action': sec['suggested_action'] ?? '',
+            'start_position': startPos,
+            'end_position': (sec['end_position'] as num?)?.toInt() ?? originalEv.endOffset,
+          });
+
+          // Determine appropriate source type based on signals and domain
+          String sourceType = 'web';
+          if (originalEv.signals.contains(PlagiarismType.selfPlagiarism)) {
+            sourceType = 'user_document';
+          } else if (sUrl?.contains('crossref') == true ||
+              sUrl?.contains('doi.org') == true ||
+              sTitle?.toLowerCase().contains('journal') == true ||
+              sTitle?.toLowerCase().contains('proceedings') == true) {
+            sourceType = 'academic';
+          } else if (originalEv.signals.contains(PlagiarismType.exactCopy) && (sUrl == null || sUrl.isEmpty)) {
+            sourceType = 'personal_source';
+          }
+
+          final sourceKey = (sUrl != null && sUrl.isNotEmpty) ? sUrl : (sTitle ?? 'source_${uniqueSources.length}');
+          final sourceSim = (sec['similarity_score'] as num?)?.toDouble() ?? 75.0;
+
+          if (uniqueSources.containsKey(sourceKey)) {
+            final prev = uniqueSources[sourceKey]!;
+            final currentSim = (prev['similarity_percentage'] as num?)?.toDouble() ?? 0.0;
+            uniqueSources[sourceKey] = {
+              ...prev,
+              'match_count': (prev['match_count'] as int? ?? 1) + 1,
+              'similarity_percentage': math.max(currentSim, sourceSim),
             };
-          }).toList(),
-        );
+          } else {
+            uniqueSources[sourceKey] = {
+              'scan_id': scanId,
+              'url': sUrl,
+              'title': sTitle ?? (sourceType == 'user_document' ? 'Your Previous Document' : 'Document Source'),
+              'domain': originalEv.domain ?? (sUrl != null ? Uri.tryParse(sUrl)?.host : null),
+              'snippet': originalEv.matchedText ?? sec['flagged_text'],
+              'similarity_percentage': sourceSim,
+              'source_type': sourceType,
+              'match_count': 1,
+            };
+          }
+        }
+
+        if (sectionRows.isNotEmpty) {
+          await _client.from('flagged_sections').insert(sectionRows);
+        }
+
+        if (uniqueSources.isNotEmpty) {
+          try {
+            await _client.from('similarity_sources').insert(uniqueSources.values.toList());
+          } catch (e) {
+            dev.log('ScanService: similarity_sources insert note: $e');
+          }
+        }
       } catch (e) {
         dev.log('ScanService: Flagged sections write failed: $e');
       }
     }
 
     // ── Step 5: Update scan_results to completed ───────────────────────────
-    final plagScore = (plagiarismResult['overall_similarity_score'] as num?)?.toDouble() ?? 0;
-    final aiScore = (aiResult['ai_score'] as num?)?.toDouble() ?? 0;
-    final writingScore = (writingResult['overall_writing_score'] as num?)?.toDouble() ?? 70;
+    final plagScore = (plagiarismResult['overall_similarity_score'] as num?)?.toDouble() ?? 0.0;
+    final aiScore = (aiResult['ai_score'] as num?)?.toDouble() ?? (aiResult['ai_generated_score'] as num?)?.toDouble() ?? 0.0;
+    final writingScore = (writingResult['overall_writing_score'] as num?)?.toDouble() ?? 75.0;
 
-    if (!scanId.startsWith('demo_')) {
+    if (!scanId.startsWith('session_')) {
       try {
         await _client.from('scan_results').update({
           'status': 'completed',
           'overall_similarity_score': plagScore,
-          'exact_match_score': (plagiarismResult['exact_match_score'] as num?)?.toDouble() ?? 0,
-          'semantic_similarity_score': (plagiarismResult['semantic_similarity_score'] as num?)?.toDouble() ?? 0,
-          'paraphrase_score': (plagiarismResult['paraphrase_score'] as num?)?.toDouble() ?? 0,
-          'ai_score': aiScore,
-          'writing_score': writingScore,
+          'exact_match_score': (plagiarismResult['exact_match_score'] as num?)?.toDouble() ?? 0.0,
+          'semantic_similarity_score': (plagiarismResult['semantic_similarity_score'] as num?)?.toDouble() ?? 0.0,
+          'paraphrase_score': (plagiarismResult['paraphrase_score'] as num?)?.toDouble() ?? 0.0,
+          'ai_generated_score': aiScore,
+          'overall_writing_score': writingScore,
+          'grammar_score': (writingResult['grammar_score'] as num?)?.toDouble(),
+          'readability_score': (writingResult['readability_score'] as num?)?.toDouble(),
+          'academic_tone_score': (writingResult['academic_tone_score'] as num?)?.toDouble(),
+          'vocabulary_score': (writingResult['vocabulary_score'] as num?)?.toDouble(),
           'executive_summary': plagiarismResult['executive_summary'],
           'completed_at': DateTime.now().toIso8601String(),
         }).eq('id', scanId);
@@ -352,9 +500,9 @@ class ScanService {
       plagiarismScore: plagScore,
       aiScore: aiScore,
       writingScore: writingScore,
-      exactMatchScore: (plagiarismResult['exact_match_score'] as num?)?.toDouble() ?? 0,
-      semanticScore: (plagiarismResult['semantic_similarity_score'] as num?)?.toDouble() ?? 0,
-      paraphraseScore: (plagiarismResult['paraphrase_score'] as num?)?.toDouble() ?? 0,
+      exactMatchScore: (plagiarismResult['exact_match_score'] as num?)?.toDouble() ?? 0.0,
+      semanticScore: (plagiarismResult['semantic_similarity_score'] as num?)?.toDouble() ?? 0.0,
+      paraphraseScore: (plagiarismResult['paraphrase_score'] as num?)?.toDouble() ?? 0.0,
       status: 'completed',
       executiveSummary: plagiarismResult['executive_summary'],
       flaggedSections: (plagiarismResult['flagged_sections'] as List<dynamic>?)?.map((s) => FlaggedSectionData.fromJson(s as Map<String, dynamic>)).toList() ?? [],
@@ -375,15 +523,16 @@ class ScanService {
       final docRow = await _client.from('documents').select('content').eq('id', documentId).single();
       String content = docRow['content'] as String;
 
-      if (content.substring(startPos, endPos) != oldText) {
+      final isWithinBounds = startPos >= 0 && endPos <= content.length && startPos <= endPos;
+      if (isWithinBounds && content.substring(startPos, endPos) == oldText) {
+          content = content.replaceRange(startPos, endPos, newText);
+      } else {
           final index = content.indexOf(oldText);
           if (index != -1) {
               content = content.replaceRange(index, index + oldText.length, newText);
           } else {
               throw Exception('Original text not found in document.');
           }
-      } else {
-          content = content.replaceRange(startPos, endPos, newText);
       }
 
       await _client.from('documents').update({
@@ -399,23 +548,13 @@ class ScanService {
     }
   }
 
-  // ── Diagnostics Mock Data (Used ONLY on API failure) ──────────────────
-
-  Map<String, dynamic> _mockPlagiarismResult(String text) {
-    dev.log('DIAGNOSTIC: Fallback to Mock Plagiarism Result');
-    return {
-      'overall_similarity_score': 0,
-      'flagged_sections': [],
-      'executive_summary': 'No definitive matches found on the web or in your database.',
-    };
-  }
-
-  Map<String, dynamic> _mockAiResult(String text) {
-    return {'ai_score': 0, 'human_score': 100, 'confidence': 50};
-  }
-
-  Map<String, dynamic> _mockWritingResult(String text) {
-    return {'overall_writing_score': 70};
+  String _mapDocumentType(String? type) {
+    if (type == null) return 'txt';
+    final lower = type.toLowerCase().replaceAll('.', '').trim();
+    if (['pdf', 'docx', 'doc', 'txt', 'rtf', 'image', 'voice'].contains(lower)) {
+      return lower;
+    }
+    return 'txt';
   }
 }
 

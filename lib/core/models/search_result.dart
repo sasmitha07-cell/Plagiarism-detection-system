@@ -19,15 +19,17 @@ class SearchResult {
   });
 
   factory SearchResult.fromJson(Map<String, dynamic> json) {
-    final uri = Uri.parse(json['url'] as String);
+    final rawUrl = json['url'] as String? ?? '';
+    final uri = Uri.tryParse(rawUrl);
+    final domain = json['domain'] as String? ?? (uri?.host.isNotEmpty == true ? uri!.host : 'web');
     return SearchResult(
       title: json['title'] as String? ?? 'No Title',
-      url: json['url'] as String,
-      domain: json['domain'] as String? ?? uri.host,
+      url: rawUrl,
+      domain: domain,
       snippet: json['snippet'] as String? ?? '',
       query: json['query'] as String? ?? '',
       rank: json['rank'] as int? ?? 0,
-      sourceType: json['sourceType'] as String? ?? 'web',
+      sourceType: json['sourceType'] as String? ?? json['source_type'] as String? ?? 'web',
     );
   }
 

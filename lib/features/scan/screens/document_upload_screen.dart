@@ -67,10 +67,10 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
   void _startAnalysis() {
     if (_extractedText == null || _extractedText!.trim().isEmpty) return;
 
-    final mockScanId = 'scan_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionScanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
     final fileName = _selectedFile?.path.split(Platform.pathSeparator).last ?? 'Document';
 
-    context.go('/scan/processing/$mockScanId', extra: {
+    context.go('/scan/processing/$sessionScanId', extra: {
       'title': fileName,
       'content': _extractedText,
       'type': fileName.split('.').last,
@@ -122,7 +122,7 @@ class _DocumentUploadScreenState extends ConsumerState<DocumentUploadScreen> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.tertiary.withOpacity(0.1),
+                        color: AppColors.tertiary.withValues(alpha: 0.12),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),

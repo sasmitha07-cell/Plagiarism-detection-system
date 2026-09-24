@@ -31,21 +31,21 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   }
 
   Future<void> _sendReset() async {
-    print('Password reset request for: ${_emailController.text}');
+    dev.log('Password reset request for: ${_emailController.text}');
     if (!_formKey.currentState!.validate()) {
-      print('Password reset form validation failed');
+      dev.log('Password reset form validation failed');
       return;
     }
     setState(() => _isLoading = true);
     try {
       final repo = ref.read(authRepositoryProvider);
       await repo.sendPasswordResetEmail(_emailController.text);
-      print('Password reset email sent (or masked success)');
+      dev.log('Password reset email sent (or masked success)');
       // Supabase intentionally does NOT differentiate between registered
       // and unregistered emails (security best practice). Always show success.
       if (mounted) setState(() => _emailSent = true);
     } catch (e) {
-      print('Password reset failed: $e');
+      dev.log('Password reset failed: $e');
       // Only show error on genuine network/config failures
       if (mounted) {
         final errMsg = e.toString().toLowerCase();

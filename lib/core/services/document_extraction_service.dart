@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+import 'package:docx_to_text/docx_to_text.dart';
+
 class DocumentExtractionService {
   DocumentExtractionService._();
   static DocumentExtractionService get instance =>
@@ -59,21 +61,59 @@ class DocumentExtractionService {
     return plainText;
   }
 
-  /// Extract text from DOCX (read XML content)
+  /// Extract text from DOCX
   Future<String> _extractFromDocx(File file) async {
-    // For DOCX, we use a simple XML extraction approach
-    // Full implementation would use a DOCX parser package
     try {
       final bytes = await file.readAsBytes();
-      // Convert bytes to string and extract text between XML tags
-      final content = String.fromCharCodes(bytes);
-      final regex = RegExp(r'<w:t[^>]*>([^<]*)</w:t>');
-      final matches = regex.allMatches(content);
-      final textParts = matches.map((m) => m.group(1) ?? '').toList();
-      return textParts.join(' ').trim();
+      String text = docxToText(bytes);
+
+      // If docx_to_text returned raw WordprocessingML XML (e.g. <w:document...)
+      if (text.contains('<w:document') || text.contains('<?xml') || text.contains('<w:p') || text.contains('<w:t')) {
+        text = _cleanDocxXml(text);
+      }
+
+      if (text.trim().isNotEmpty) {
+        return text.trim();
+      }
+      return 'Could not extract text from DOCX file. The document might be empty or password protected.';
     } catch (e) {
-      return 'Could not extract text from DOCX file. Please try converting to PDF or TXT.';
+      return 'Could not extract text from DOCX file: $e. Please try converting to PDF or TXT.';
     }
+  }
+
+  String _cleanDocxXml(String xml) {
+    // 1. Extract text from <w:t> tags
+    final matches = RegExp(r'<w:t[^>]*>(.*?)</w:t>', dotAll: true).allMatches(xml);
+    if (matches.isNotEmpty) {
+      final buffer = StringBuffer();
+      for (final m in matches) {
+        final val = m.group(1) ?? '';
+        buffer.write(val);
+        buffer.write(' ');
+      }
+      var clean = buffer.toString();
+      clean = clean
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'");
+      return clean.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+
+    // 2. Fallback: Strip all XML tags and decode entities
+    final stripped = xml
+        .replaceAll(RegExp(r'</w:p>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]+>'), ' ')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
+    return stripped;
   }
 
   /// Count words in text

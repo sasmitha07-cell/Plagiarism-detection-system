@@ -307,7 +307,7 @@ class _FaqTile extends StatelessWidget {
                 height: 32,
                 decoration: BoxDecoration(
                   color: isExpanded
-                      ? AppColors.primary.withOpacity(0.15)
+                      ? AppColors.primary.withValues(alpha: 0.15)
                       : AppColors.primarySurface,
                   shape: BoxShape.circle,
                 ),

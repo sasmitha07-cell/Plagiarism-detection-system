@@ -6,7 +6,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'core/theme/app_theme.dart';
 import 'core/navigation/app_router.dart';
 import 'core/constants/app_constants.dart';
-import 'core/services/gemini_service.dart';
 
 /// Parse a simple KEY=VALUE .env file. Lines starting with '#' and blank
 /// lines are ignored. Values are not trimmed beyond removing the newline.
@@ -73,7 +72,7 @@ void main() async {
   // Initialize Supabase
   try {
     print('Main: Initializing Supabase');
-    // ignore: deprecated_member_use — anonKey is the correct param name for supabase_flutter ^2.x
+    // ignore: deprecated_member_use — supabase_flutter ^2.x uses anonKey, newer versions may use publishableKey
     await Supabase.initialize(
       url: AppConstants.supabaseUrl,
       anonKey: AppConstants.supabaseAnonKey,

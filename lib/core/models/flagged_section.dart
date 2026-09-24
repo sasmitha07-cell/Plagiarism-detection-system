@@ -6,6 +6,8 @@ enum PlagiarismType {
   paraphrased,
   aiRewritten,
   webDiscovery, // Match found on the live web
+  selfPlagiarism, // Reused from author's previous document
+  quotedAndCited, // Properly quoted and referenced
 }
 
 enum RiskLevel { safe, low, medium, high, critical }
@@ -100,7 +102,14 @@ class FlaggedSection {
       case 'ai_rewritten':
         return PlagiarismType.aiRewritten;
       case 'webDiscovery':
+      case 'web_discovery':
         return PlagiarismType.webDiscovery;
+      case 'selfPlagiarism':
+      case 'self_plagiarism':
+        return PlagiarismType.selfPlagiarism;
+      case 'quotedAndCited':
+      case 'quoted_and_cited':
+        return PlagiarismType.quotedAndCited;
       default:
         return PlagiarismType.exactCopy;
     }
@@ -139,6 +148,10 @@ class FlaggedSection {
         return 'AI-Rewritten Content';
       case PlagiarismType.webDiscovery:
         return 'Web Discovery';
+      case PlagiarismType.selfPlagiarism:
+        return 'Possible Self-Plagiarism';
+      case PlagiarismType.quotedAndCited:
+        return 'Quoted & Cited';
     }
   }
 

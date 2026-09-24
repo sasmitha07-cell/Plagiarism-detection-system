@@ -96,11 +96,11 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: const Size(0, 48),
           textStyle: AppTypography.labelLarge.copyWith(
             color: AppColors.textOnPrimary,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         ),
       ),
 
@@ -112,9 +112,9 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: const Size(0, 48),
           textStyle: AppTypography.labelLarge.copyWith(color: AppColors.primary),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         ),
       ),
 

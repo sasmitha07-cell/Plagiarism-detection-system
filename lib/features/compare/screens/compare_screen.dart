@@ -24,8 +24,8 @@ class _CompareScreenState extends ConsumerState<CompareScreen> {
   void _startComparison() {
     if (_docAText == null || _docBText == null) return;
 
-    final mockCompareId = 'comp_${DateTime.now().millisecondsSinceEpoch}';
-    context.go('/compare/result/$mockCompareId', extra: {
+    final sessionCompareId = 'session_comp_${DateTime.now().microsecondsSinceEpoch}';
+    context.go('/compare/result/$sessionCompareId', extra: {
       'titleA': _docAName ?? 'Document A',
       'textA': _docAText,
       'titleB': _docBName ?? 'Document B',

@@ -13,18 +13,19 @@ class VectorService {
     try {
       await _client.from('document_chunks').insert(chunks);
     } catch (e) {
+      // Non-fatal if offline or demo mode
       print('VectorService Error (storeChunks): $e');
-      rethrow;
     }
   }
 
-  /// Searches for similar chunks using the secure pgvector RPC (Single).
+  /// Searches for similar chunks using pgvector RPC (Single Chunk).
   Future<List<MatchEvidence>> searchSimilarChunks({
     required List<double> embedding,
-    double matchThreshold = 0.8,
+    double matchThreshold = 0.72,
     int matchCount = 5,
     String? targetDocumentId,
     String? excludeDocumentId,
+    String? userId,
   }) async {
     try {
       final response = await _client.rpc(
@@ -35,22 +36,30 @@ class VectorService {
           'match_count': matchCount,
           if (targetDocumentId != null) 'target_document_id': targetDocumentId,
           if (excludeDocumentId != null) 'exclude_document_id': excludeDocumentId,
+          if (userId != null) 'p_user_id': userId,
         },
       );
 
       final List<dynamic> data = response as List<dynamic>;
       return data.map<MatchEvidence>((item) {
+        final isSelf = item['user_id'] == userId;
         return MatchEvidence(
           submittedText: '', // Filled by orchestrator
           matchedText: item['content'] as String,
-          sourceTitle: 'Your Previous Document', // Default for self-plagiarism
-          signals: [PlagiarismType.semanticSimilarity],
+          sourceTitle: isSelf ? 'Your Previous Document' : 'Referenced Document',
+          signals: [
+            isSelf ? PlagiarismType.selfPlagiarism : PlagiarismType.semanticSimilarity,
+          ],
           semanticSimilarity: (item['similarity'] as num).toDouble(),
+          selfPlagiarismSimilarity: isSelf ? (item['similarity'] as num).toDouble() : 0.0,
           startOffset: 0,
           endOffset: 0,
           pageNumber: item['page_number'] as int?,
           paragraphNumber: item['paragraph_number'] as int?,
           sentenceNumber: item['sentence_number'] as int?,
+          classification: isSelf
+              ? EvidenceClassification.possibleSelfPlagiarism
+              : EvidenceClassification.semanticParaphrase,
         );
       }).toList();
     } catch (e) {
@@ -63,21 +72,28 @@ class VectorService {
   /// Returns a map of queryIndex -> list of matches.
   Future<Map<int, List<MatchEvidence>>> searchSimilarChunksBatch({
     required List<List<double>> embeddings,
-    double matchThreshold = 0.8,
+    double matchThreshold = 0.72,
     int matchCount = 5,
     String? targetDocumentId,
     String? excludeDocumentId,
+    String? userId,
   }) async {
     if (embeddings.isEmpty) return {};
     try {
+      // PostgreSQL pgvector vector[] expects each element formatted as a vector literal string: ['[0.1, 0.2, ...]', ...]
+      final formattedEmbeddings = embeddings
+          .map((e) => '[${e.join(',')}]')
+          .toList();
+
       final response = await _client.rpc(
         'match_document_chunks_batch',
         params: {
-          'query_embeddings': embeddings,
+          'query_embeddings': formattedEmbeddings,
           'match_threshold': matchThreshold,
           'match_count': matchCount,
           if (targetDocumentId != null) 'target_document_id': targetDocumentId,
           if (excludeDocumentId != null) 'exclude_document_id': excludeDocumentId,
+          if (userId != null) 'p_user_id': userId,
         },
       );
 
@@ -87,18 +103,25 @@ class VectorService {
       for (final item in data) {
         // SQL ordinality starts at 1
         final int idx = (item['query_index'] as int) - 1;
-        
+        final isSelf = userId != null && item['user_id'] == userId;
+
         final match = MatchEvidence(
-          submittedText: '', 
+          submittedText: '',
           matchedText: item['content'] as String,
-          sourceTitle: 'Your Previous Document',
-          signals: [PlagiarismType.semanticSimilarity],
+          sourceTitle: isSelf ? 'Your Previous Document' : 'Repository Document',
+          signals: [
+            isSelf ? PlagiarismType.selfPlagiarism : PlagiarismType.semanticSimilarity,
+          ],
           semanticSimilarity: (item['similarity'] as num).toDouble(),
+          selfPlagiarismSimilarity: isSelf ? (item['similarity'] as num).toDouble() : 0.0,
           startOffset: 0,
           endOffset: 0,
           pageNumber: item['page_number'] as int?,
           paragraphNumber: item['paragraph_number'] as int?,
           sentenceNumber: item['sentence_number'] as int?,
+          classification: isSelf
+              ? EvidenceClassification.possibleSelfPlagiarism
+              : EvidenceClassification.semanticParaphrase,
         );
 
         results.putIfAbsent(idx, () => []).add(match);

@@ -83,9 +83,9 @@ class _VoiceInputScreenState extends ConsumerState<VoiceInputScreen> {
   void _startAnalysis() {
     if (_text.trim().isEmpty) return;
 
-    final mockScanId = 'scan_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionScanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
 
-    context.go('/scan/processing/$mockScanId', extra: {
+    context.go('/scan/processing/$sessionScanId', extra: {
       'title': 'Voice Note',
       'content': _text,
       'type': 'voice',
@@ -189,7 +189,7 @@ class _VoiceInputScreenState extends ConsumerState<VoiceInputScreen> {
                             boxShadow: _isListening
                                 ? [
                                     BoxShadow(
-                                      color: AppColors.accent.withOpacity(0.4),
+                                      color: AppColors.accent.withValues(alpha: 0.4),
                                       blurRadius: 20,
                                       spreadRadius: 4,
                                     )

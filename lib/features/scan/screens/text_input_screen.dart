@@ -42,12 +42,10 @@ class _TextInputScreenState extends ConsumerState<TextInputScreen> {
   void _startAnalysis() {
     if (_textController.text.trim().isEmpty) return;
     
-    // In a real app, you would save this to the database, generate an ID,
-    // and pass the scanId. For now, we mock a scanId.
-    final mockScanId = 'scan_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionScanId = 'session_${DateTime.now().microsecondsSinceEpoch}';
     
     // Navigate to processing screen
-    context.go('/scan/processing/$mockScanId', extra: {
+    context.go('/scan/processing/$sessionScanId', extra: {
       'title': _titleController.text.isNotEmpty ? _titleController.text : 'Pasted Text',
       'content': _textController.text,
       'type': 'txt'
