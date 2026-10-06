@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-const MODEL = 'gemini-2.5-flash' // High-efficiency multimodal & reasoning model
+const MODEL = 'gemini-3.6-flash' // High-efficiency multimodal & reasoning model
 
 console.log("Gemini Reasoning Edge Function (Academic Integrity & Writing Coach Studio) Initialized")
 
@@ -193,7 +193,7 @@ Respond ONLY with a valid JSON object in this exact schema:
         return new Response(JSON.stringify({ error: 'Invalid action' }), { headers, status: 400 })
     }
 
-    const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    const CANDIDATE_MODELS = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
     let lastError: any = null
     let data: any = null
 
@@ -240,7 +240,12 @@ Respond ONLY with a valid JSON object in this exact schema:
       resultText = resultText.replace(/^```\s*/, '').replace(/\s*```$/, '')
     }
 
-    return new Response(resultText, { headers })
+    try {
+      const parsed = JSON.parse(resultText)
+      return new Response(JSON.stringify(parsed), { headers })
+    } catch (_e) {
+      return new Response(resultText, { headers })
+    }
 
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error?.message || 'Unknown error' }), { headers, status: 500 })

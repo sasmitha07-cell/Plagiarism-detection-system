@@ -18,7 +18,7 @@ void main() {
       expect(report['overall_similarity_score'], 0.0);
       expect(report['exact_match_score'], 0.0);
       expect(report['flagged_sections'], isEmpty);
-      expect(report['executive_summary'].toString().contains('highly original'), true);
+      expect(report['executive_summary'].toString().contains('100% originality'), true);
     });
 
     test('Exact match evidence computes proper weighted scores and flags', () {

@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/widgets/app_snackbar.dart';
+import '../../auth/providers/auth_provider.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _plagiarismAlerts = true;
   bool _weeklyReport = true;
   bool _writingTips = false;
@@ -22,6 +26,158 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   final List<String> _languages = ['English', 'Spanish', 'French', 'German', 'Arabic'];
   final List<String> _themes = ['Forest Green', 'Ocean Blue', 'Sunset Coral'];
+
+  void _showChangePasswordDialog() {
+    final currentUserId = ref.read(currentUserIdProvider);
+    if (currentUserId == null || currentUserId == 'demo-user-id') {
+      AppSnackbar.showError(context, 'Password change is only available for registered user accounts.');
+      return;
+    }
+
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+    bool obscureNew = true;
+    bool obscureConfirm = true;
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            'Change Password',
+            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w800),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Enter a new secure password for your account.',
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: newPasswordController,
+                  obscureText: obscureNew,
+                  decoration: InputDecoration(
+                    labelText: 'New Password',
+                    prefixIcon: const Icon(Icons.lock_outline_rounded),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscureNew ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setDialogState(() => obscureNew = !obscureNew),
+                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmPasswordController,
+                  obscureText: obscureConfirm,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm Password',
+                    prefixIcon: const Icon(Icons.lock_outline_rounded),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscureConfirm ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setDialogState(() => obscureConfirm = !obscureConfirm),
+                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
+                      final newPass = newPasswordController.text;
+                      final confirmPass = confirmPasswordController.text;
+
+                      if (newPass.length < 6) {
+                        AppSnackbar.showError(context, 'Password must be at least 6 characters long.');
+                        return;
+                      }
+
+                      if (newPass != confirmPass) {
+                        AppSnackbar.showError(context, 'Passwords do not match.');
+                        return;
+                      }
+
+                      setDialogState(() => isSubmitting = true);
+
+                      try {
+                        await ref.read(authRepositoryProvider).updatePassword(newPass);
+                        if (ctx.mounted) {
+                          Navigator.pop(ctx);
+                        }
+                        if (mounted) {
+                          AppSnackbar.showSuccess(context, 'Password updated successfully!');
+                        }
+                      } catch (e) {
+                        setDialogState(() => isSubmitting = false);
+                        if (mounted) {
+                          debugPrint('[SettingsScreen] Password update error: $e');
+                          AppSnackbar.showError(context, 'Failed to update password. Please try again.');
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: isSubmitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Update'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteAccountNotice() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Account'),
+        content: const Text(
+          'To ensure academic data safety and prevent accidental loss of papers, self-service account deletion requires administrator verification.\n\nPlease contact support to permanently remove your account and all associated documents.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.go('/profile/help');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Contact Support'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,6 +245,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _biometricLogin,
                     onChanged: (v) => setState(() => _biometricLogin = v),
                   ).animate().fadeIn(delay: 350.ms).slideY(begin: 0.1),
+                  const SizedBox(height: 8),
+                  _ActionTile(
+                    icon: Icons.lock_reset_rounded,
+                    iconColor: AppColors.primary,
+                    title: 'Change Password',
+                    subtitle: 'Update your account password securely',
+                    onTap: _showChangePasswordDialog,
+                  ).animate().fadeIn(delay: 380.ms).slideY(begin: 0.1),
 
                   const SizedBox(height: 24),
 
@@ -154,16 +318,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.download_outlined,
                     iconColor: AppColors.primary,
                     title: 'Export My Data',
-                    subtitle: 'Download all your documents and scan history',
-                    onTap: () => _showSnack('Export started — check your email shortly.'),
+                    subtitle: 'Download your document scans and summaries',
+                    onTap: () => AppSnackbar.showInfo(context, 'Export requested. Processing your document archives.'),
                   ).animate().fadeIn(delay: 750.ms).slideY(begin: 0.1),
                   const SizedBox(height: 8),
                   _ActionTile(
                     icon: Icons.delete_outline_rounded,
-                    iconColor: AppColors.secondary,
+                    iconColor: AppColors.riskCritical,
                     title: 'Delete My Account',
-                    subtitle: 'Permanently remove all data',
-                    onTap: () => _showDeleteConfirm(),
+                    subtitle: 'Permanently remove your account and data',
+                    onTap: _showDeleteAccountNotice,
                   ).animate().fadeIn(delay: 800.ms).slideY(begin: 0.1),
 
                   const SizedBox(height: 48),
@@ -172,38 +336,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-    );
-  }
-
-  void _showDeleteConfirm() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete Account?'),
-        content: const Text(
-          'This will permanently delete all your data. This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showSnack('Account deletion requested.');
-            },
-            style: TextButton.styleFrom(foregroundColor: AppColors.secondary),
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
   }

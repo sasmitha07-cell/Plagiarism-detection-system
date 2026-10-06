@@ -110,13 +110,35 @@ class UserProfile {
     );
   }
 
-  String get displayName => fullName ?? email.split('@').first;
+  String get displayName => (fullName != null && fullName!.trim().isNotEmpty) ? fullName! : email.split('@').first;
   String get initials {
-    final name = displayName;
-    final parts = name.split(' ');
+    final name = displayName.trim();
+    if (name.isEmpty) return 'U';
+    final parts = name.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
-    return name.substring(0, name.length.clamp(0, 2)).toUpperCase();
+    return name.substring(0, name.length.clamp(1, 2)).toUpperCase();
+  }
+
+  String get academicLevelFormatted {
+    switch (academicLevel?.toLowerCase()) {
+      case 'high_school':
+        return 'High School';
+      case 'undergraduate':
+        return 'Undergraduate';
+      case 'graduate':
+        return 'Graduate';
+      case 'doctorate':
+        return 'Doctorate / PhD';
+      case 'faculty':
+        return 'Faculty';
+      case 'researcher':
+        return 'Researcher';
+      case 'other':
+        return 'Other';
+      default:
+        return academicLevel ?? 'Undergraduate';
+    }
   }
 }

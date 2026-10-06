@@ -10,6 +10,7 @@ import '../../../core/services/pdf_export_service.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/models/flagged_section.dart';
 import '../../scan/providers/scan_provider.dart';
+import '../../../core/utils/error_mapper.dart';
 
 class ReportDetailScreen extends ConsumerStatefulWidget {
   final String scanId;
@@ -60,7 +61,10 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isExporting = false);
-        AppSnackbar.showError(context, 'Failed to generate PDF: $e');
+        AppSnackbar.showError(
+          context,
+          AppErrorMapper.getUserMessage(e, fallback: 'Failed to generate PDF report. Please try again.'),
+        );
       }
     }
   }
@@ -86,7 +90,33 @@ class _ReportDetailScreenState extends ConsumerState<ReportDetailScreen> {
       body: SafeArea(
         child: scanResultAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error loading report: $e')),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textTertiary),
+                  const SizedBox(height: 16),
+                  Text(
+                    AppErrorMapper.toUserFriendlyMessage(e, defaultAction: 'load report'),
+                    textAlign: TextAlign.center,
+                    style: AppTypography.titleSmall.copyWith(color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () => ref.invalidate(scanResultProvider(widget.scanId)),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Retry'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: const BorderSide(color: AppColors.primary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           data: (result) {
             final double similarityScore = result?.plagiarismScore ?? 12.5;
             final double writingScore = result?.writingScore ?? 88.0;

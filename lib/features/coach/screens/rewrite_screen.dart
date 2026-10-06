@@ -7,6 +7,7 @@ import '../../scan/providers/scan_provider.dart';
 import '../../../core/services/gemini_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/error_mapper.dart';
 import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/models/flagged_section.dart';
@@ -37,6 +38,8 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
   bool _isGenerating = false;
   String? _suggestedText;
   String? _citationReminder;
+  String? _errorMessage;
+  bool _isNoChanges = false;
   int _selectedToneIndex = 0;
 
   final List<Map<String, dynamic>> _tones = [
@@ -57,6 +60,8 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
       _isGenerating = true;
       _suggestedText = null;
       _citationReminder = null;
+      _errorMessage = null;
+      _isNoChanges = false;
     });
 
     try {
@@ -68,37 +73,44 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
 
       if (!mounted) return;
 
+      final rewritten = (result['rewritten_text'] as String?)?.trim();
+      final reminder = result['citation_reminder'] as String?;
+
+      if (rewritten == null || rewritten.isEmpty) {
+        setState(() {
+          _isGenerating = false;
+          _errorMessage = "Couldn't generate a revision. Please try again.";
+        });
+        return;
+      }
+
+      // Check if generated revision is genuinely identical to the original
+      if (rewritten.toLowerCase() == widget.originalText.trim().toLowerCase()) {
+        setState(() {
+          _isGenerating = false;
+          _isNoChanges = true;
+          _suggestedText = null;
+        });
+        return;
+      }
+
       setState(() {
         _isGenerating = false;
-        if (result['rewritten_text'] != null && result['rewritten_text'].toString().isNotEmpty) {
-          _suggestedText = result['rewritten_text'] as String?;
-          _citationReminder = result['citation_reminder'] as String?;
-        } else {
-          // Deterministic fallback rewrite if edge service offline
-          _suggestedText = _generateLocalParaphrase(widget.originalText, tone);
-        }
+        _suggestedText = rewritten;
+        _citationReminder = reminder;
+        _isNoChanges = false;
+        _errorMessage = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isGenerating = false;
-        final tone = _tones[_selectedToneIndex]['label'] as String;
-        _suggestedText = _generateLocalParaphrase(widget.originalText, tone);
+        _errorMessage = AppErrorMapper.getUserMessage(
+          e,
+          fallback: "Couldn't generate a revision. Please try again.",
+        );
       });
     }
-  }
-
-  String _generateLocalParaphrase(String text, String style) {
-    String out = text;
-    out = out.replaceAll(RegExp(r'\ba lot of\b', caseSensitive: false), 'a substantial volume of');
-    out = out.replaceAll(RegExp(r'\bin order to\b', caseSensitive: false), 'to');
-    out = out.replaceAll(RegExp(r'\bdue to the fact that\b', caseSensitive: false), 'because');
-    out = out.replaceAll(RegExp(r'\blook into\b', caseSensitive: false), 'investigate');
-    out = out.replaceAll(RegExp(r'\bshow\b', caseSensitive: false), 'demonstrate');
-    out = out.replaceAll(RegExp(r'\bget\b', caseSensitive: false), 'obtain');
-    out = out.replaceAll(RegExp(r'\bkids\b', caseSensitive: false), 'adolescents');
-    out = out.replaceAll(RegExp(r'\bthings\b', caseSensitive: false), 'variables');
-    return out;
   }
 
   void _copyToClipboard(String text) {
@@ -114,9 +126,10 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isPlagiarismWarningNeeded = widget.type == PlagiarismType.exactCopy ||
-        widget.type == PlagiarismType.webDiscovery ||
-        widget.type == PlagiarismType.selfPlagiarism;
+    final isPlagiarismWarningNeeded = widget.type != null &&
+        (widget.type == PlagiarismType.exactCopy ||
+            widget.type == PlagiarismType.partialCopy ||
+            widget.type == PlagiarismType.webDiscovery);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -244,13 +257,16 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
 
                     const SizedBox(height: 28),
 
-                    // Suggested Text Section
+                    // Suggested Text Section Header
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Suggested Revision',
-                          style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                        Flexible(
+                          child: Text(
+                            'Suggested Revision',
+                            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         if (_suggestedText != null && !_isGenerating)
                           TextButton.icon(
@@ -262,17 +278,111 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
                     ).animate().fadeIn(delay: 500.ms),
                     const SizedBox(height: 12),
 
+                    // 1. Loading State
                     if (_isGenerating)
                       Container(
-                        height: 140,
+                        padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
                         decoration: BoxDecoration(
                           color: AppColors.surfaceVariant,
                           borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.borderLight),
                         ),
-                        child: const Center(
-                          child: CircularProgressIndicator(color: AppColors.primary),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              width: 32,
+                              height: 32,
+                              child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.primary),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Preparing your revision...',
+                              style: AppTypography.bodyMedium.copyWith(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Applying ${_tones[_selectedToneIndex]['label']} tone while preserving academic integrity',
+                              textAlign: TextAlign.center,
+                              style: AppTypography.labelSmall.copyWith(color: AppColors.textSecondary),
+                            ),
+                          ],
                         ),
                       ).animate().fadeIn()
+
+                    // 2. Fallback: No Meaningful Changes Made
+                    else if (_isNoChanges)
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.borderLight),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.info_outline_rounded, size: 40, color: AppColors.secondary),
+                            const SizedBox(height: 12),
+                            Text(
+                              'AI returned no meaningful changes. Try another tone or regenerate.',
+                              textAlign: TextAlign.center,
+                              style: AppTypography.bodyMedium.copyWith(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _generateRewrite,
+                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                              label: const Text('Regenerate'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ).animate().fadeIn()
+
+                    // 3. Error State
+                    else if (_errorMessage != null)
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.borderLight),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.cloud_off_rounded, size: 40, color: AppColors.textTertiary),
+                            const SizedBox(height: 12),
+                            Text(
+                              "Couldn't generate a revision. Please try again.",
+                              textAlign: TextAlign.center,
+                              style: AppTypography.bodyMedium.copyWith(color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 16),
+                            OutlinedButton.icon(
+                              onPressed: _generateRewrite,
+                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                              label: const Text('Retry'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.primary,
+                                side: const BorderSide(color: AppColors.primary),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ).animate().fadeIn()
+
+                    // 4. Success State: Display Generated Revision
                     else if (_suggestedText != null)
                       Container(
                         padding: const EdgeInsets.all(18),
@@ -291,7 +401,7 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
+                            SelectableText(
                               _suggestedText!,
                               style: AppTypography.bodyLarge.copyWith(
                                 height: 1.6,
@@ -299,21 +409,47 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
-                            if (_citationReminder != null) ...[
+                            if (_citationReminder != null && _citationReminder!.isNotEmpty) ...[
                               const SizedBox(height: 12),
-                              Text(
-                                _citationReminder!,
-                                style: AppTypography.labelSmall.copyWith(color: AppColors.textTertiary),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primarySurface,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(Icons.format_quote_rounded, size: 16, color: AppColors.primary),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _citationReminder!,
+                                        style: AppTypography.labelSmall.copyWith(color: AppColors.primary, height: 1.4),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                             const SizedBox(height: 16),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                IconButton(
-                                  icon: const Icon(Icons.copy_rounded, color: AppColors.primary),
+                                OutlinedButton.icon(
                                   onPressed: () => _copyToClipboard(_suggestedText!),
-                                  tooltip: 'Copy to clipboard',
+                                  icon: const Icon(Icons.copy_rounded, size: 16),
+                                  label: const Text('Copy'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppColors.textSecondary,
+                                    side: const BorderSide(color: AppColors.borderLight),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                TextButton.icon(
+                                  onPressed: _generateRewrite,
+                                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                                  label: const Text('Regenerate'),
                                 ),
                               ],
                             ),
@@ -325,7 +461,7 @@ class _RewriteScreenState extends ConsumerState<RewriteScreen> {
               ),
             ),
 
-            // Bottom Action
+            // Bottom Action: Apply Revision & Update Document
             if (_suggestedText != null && !_isGenerating)
               Container(
                 padding: const EdgeInsets.all(24),

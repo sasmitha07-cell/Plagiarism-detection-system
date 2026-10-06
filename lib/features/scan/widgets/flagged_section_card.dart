@@ -97,9 +97,12 @@ class FlaggedSectionCard extends StatelessWidget {
               children: [
                 Icon(icon, color: accentColor, size: 20),
                 const SizedBox(width: 8),
-                Text(
-                  typeLabel,
-                  style: AppTypography.labelLarge.copyWith(color: accentColor),
+                Flexible(
+                  child: Text(
+                    typeLabel,
+                    style: AppTypography.labelLarge.copyWith(color: accentColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 if (isVerified) ...[
                   const SizedBox(width: 8),
@@ -119,7 +122,7 @@ class FlaggedSectionCard extends StatelessWidget {
                     ),
                   ),
                 ],
-                const Spacer(),
+                const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(

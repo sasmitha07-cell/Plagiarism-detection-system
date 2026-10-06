@@ -113,11 +113,14 @@ class _DocumentHighlightViewerState extends State<DocumentHighlightViewer> {
               children: [
                 const Icon(Icons.highlight_rounded, color: AppColors.primary, size: 20),
                 const SizedBox(width: 8),
-                Text(
-                  'In-Document Highlights',
-                  style: AppTypography.titleSmall.copyWith(fontWeight: FontWeight.w700),
+                Expanded(
+                  child: Text(
+                    'In-Document Highlights',
+                    style: AppTypography.titleSmall.copyWith(fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 if (widget.flaggedSections.isNotEmpty) ...[
                   IconButton(
                     icon: const Icon(Icons.chevron_left_rounded, size: 20),
@@ -175,11 +178,15 @@ class _DocumentHighlightViewerState extends State<DocumentHighlightViewer> {
               ),
               child: Row(
                 children: [
-                  Text(
-                    'Tap any highlighted text to inspect details & fix',
-                    style: AppTypography.labelSmall.copyWith(color: AppColors.textTertiary),
+                  Expanded(
+                    child: Text(
+                      'Tap any highlighted text to inspect details & fix',
+                      style: AppTypography.labelSmall.copyWith(color: AppColors.textTertiary),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   TextButton.icon(
                     onPressed: () => _showIssueDetailsModal(widget.flaggedSections[_activeIssueIndex]),
                     icon: const Icon(Icons.touch_app_rounded, size: 14),
@@ -352,28 +359,34 @@ class _IssueInspectorSheet extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: riskColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: riskColor.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.warning_amber_rounded, color: riskColor, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      _getTypeLabel(type),
-                      style: AppTypography.labelMedium.copyWith(
-                        color: riskColor,
-                        fontWeight: FontWeight.w700,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: riskColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: riskColor.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: riskColor, size: 16),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _getTypeLabel(type),
+                          style: AppTypography.labelMedium.copyWith(
+                            color: riskColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               Text(
                 '${issue.similarityScore}% Match',
                 style: AppTypography.titleMedium.copyWith(
@@ -469,9 +482,9 @@ class _IssueInspectorSheet extends StatelessWidget {
                       context.push('/profile/citations');
                     },
                     icon: const Icon(Icons.format_quote_rounded, size: 18),
-                    label: const Text('Cite Source'),
+                    label: const Text('Cite Source', maxLines: 1, overflow: TextOverflow.ellipsis),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
                       side: const BorderSide(color: AppColors.primary),
                     ),
                   ),
@@ -492,11 +505,11 @@ class _IssueInspectorSheet extends StatelessWidget {
                     });
                   },
                   icon: const Icon(Icons.auto_fix_high_rounded, size: 18),
-                  label: const Text('Fix with AI Coach'),
+                  label: const Text('Fix with AI Coach', maxLines: 1, overflow: TextOverflow.ellipsis),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
                   ),
                 ),
               ),

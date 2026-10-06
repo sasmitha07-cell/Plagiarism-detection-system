@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/coach_message.dart';
 import '../../../core/models/scan_result.dart';
 import '../../../core/services/gemini_service.dart';
+import '../../../core/utils/error_mapper.dart';
 
 class CoachChatState {
   final List<CoachMessage> messages;
@@ -148,7 +149,11 @@ class CoachChatNotifier extends Notifier<CoachChatState> {
       );
     } catch (e) {
       dev.log('CoachChatNotifier Error: $e');
-      final errorMsg = CoachMessage.error(e.toString());
+      final friendlyError = AppErrorMapper.getUserMessage(
+        e,
+        fallback: 'Could not complete coaching inquiry. Please try again.',
+      );
+      final errorMsg = CoachMessage.error(friendlyError);
       final currentList = List<CoachMessage>.from(state.messages)
         ..removeWhere((m) => m.id == thinkingMsg.id)
         ..add(errorMsg);
@@ -156,7 +161,7 @@ class CoachChatNotifier extends Notifier<CoachChatState> {
       state = state.copyWith(
         messages: currentList,
         isGenerating: false,
-        error: e.toString(),
+        error: friendlyError,
       );
     }
   }

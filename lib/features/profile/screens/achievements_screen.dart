@@ -19,8 +19,25 @@ class AchievementsScreen extends ConsumerWidget {
         backgroundColor: AppColors.background,
       ),
       body: recentScansAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textTertiary),
+                const SizedBox(height: 12),
+                const Text('Unable to load achievements.', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  onPressed: () => ref.invalidate(recentScansProvider),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
         data: (scans) {
           final totalScans = scans.length;
           final hasZeroPlag = scans.any((s) => s.overallSimilarityScore < 10);
@@ -104,7 +121,9 @@ class AchievementsScreen extends ConsumerWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Keep scanning and improving your writing to unlock all badges.',
+                              unlockedCount == 0
+                                  ? 'Start using the app to unlock achievements.'
+                                  : 'Keep scanning and improving your writing to unlock all badges.',
                               style: AppTypography.bodySmall.copyWith(color: Colors.white70),
                             ),
                           ],

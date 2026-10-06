@@ -2,16 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/error_mapper.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/gradient_button.dart';
-import '../../auth/providers/auth_provider.dart';
+
+bool _isValidUuid(String? id) {
+  if (id == null) return false;
+  final uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+  return uuidRegex.hasMatch(id);
+}
 
 final savedCitationsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) return [];
+  final currentUser = Supabase.instance.client.auth.currentUser;
+  final userId = currentUser?.id;
+
+  // Strict UUID validation: never send demo-user-id or non-UUID strings to Supabase
+  if (userId == null || !_isValidUuid(userId)) {
+    return [];
+  }
 
   final client = Supabase.instance.client;
   final data = await client
@@ -116,8 +130,10 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
 
   Future<void> _saveCitation() async {
     if (_generatedCitation == null) return;
-    final userId = ref.read(currentUserIdProvider);
-    if (userId == null) {
+    final currentAuthUser = Supabase.instance.client.auth.currentUser;
+    final realUserId = currentAuthUser?.id;
+
+    if (realUserId == null || !_isValidUuid(realUserId)) {
       AppSnackbar.showError(context, 'Please sign in to save citations.');
       return;
     }
@@ -125,24 +141,48 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
     setState(() => _isSaving = true);
     try {
       final client = Supabase.instance.client;
-      await client.from('citations').insert({
-        'user_id': userId,
-        'style': _selectedStyle.toLowerCase(),
-        'source_type': 'web',
-        'title': _titleController.text.trim(),
-        'authors': [_authorController.text.trim()],
-        'publication_date': _dateController.text.trim(),
-        'publisher': _publisherController.text.trim(),
-        'url': _urlController.text.trim(),
-        'formatted_citation': _generatedCitation,
-      });
+
+      // Adapt accurately to real database schema of the 'citations' table:
+      // user_id, source_url, source_title, source_author, source_publication_date,
+      // source_publisher, citation_apa, citation_mla, citation_ieee, citation_harvard, citation_chicago
+      final insertData = <String, dynamic>{
+        'user_id': realUserId,
+        'source_url': _urlController.text.trim(),
+        'source_title': _titleController.text.trim(),
+        'source_author': _authorController.text.trim(),
+        'source_publication_date': _dateController.text.trim(),
+        'source_publisher': _publisherController.text.trim(),
+      };
+
+      switch (_selectedStyle.toUpperCase()) {
+        case 'APA':
+          insertData['citation_apa'] = _generatedCitation;
+          break;
+        case 'MLA':
+          insertData['citation_mla'] = _generatedCitation;
+          break;
+        case 'IEEE':
+          insertData['citation_ieee'] = _generatedCitation;
+          break;
+        case 'HARVARD':
+          insertData['citation_harvard'] = _generatedCitation;
+          break;
+        case 'CHICAGO':
+          insertData['citation_chicago'] = _generatedCitation;
+          break;
+        default:
+          insertData['citation_apa'] = _generatedCitation;
+      }
+
+      await client.from('citations').insert(insertData);
 
       if (mounted) {
         AppSnackbar.showSuccess(context, 'Citation saved to your library!');
         ref.invalidate(savedCitationsProvider);
       }
     } catch (e) {
-      if (mounted) AppSnackbar.showError(context, 'Failed to save citation: $e');
+      final friendlyMsg = AppErrorMapper.toUserFriendlyMessage(e, defaultAction: 'save citation');
+      if (mounted) AppSnackbar.showError(context, friendlyMsg);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -162,6 +202,38 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
     setState(() {
       _generatedCitation = null;
     });
+  }
+
+  static String _extractCitationText(Map<String, dynamic> c) {
+    final apa = c['citation_apa'] as String?;
+    if (apa != null && apa.isNotEmpty) return apa;
+    final mla = c['citation_mla'] as String?;
+    if (mla != null && mla.isNotEmpty) return mla;
+    final ieee = c['citation_ieee'] as String?;
+    if (ieee != null && ieee.isNotEmpty) return ieee;
+    final harvard = c['citation_harvard'] as String?;
+    if (harvard != null && harvard.isNotEmpty) return harvard;
+    final chicago = c['citation_chicago'] as String?;
+    if (chicago != null && chicago.isNotEmpty) return chicago;
+    final formatted = c['formatted_citation'] as String?;
+    if (formatted != null && formatted.isNotEmpty) return formatted;
+    final title = c['source_title'] as String? ?? c['title'] as String? ?? '';
+    final author = c['source_author'] as String? ?? '';
+    if (title.isNotEmpty) {
+      return author.isNotEmpty ? '$author. $title.' : title;
+    }
+    return '';
+  }
+
+  static String _extractCitationStyle(Map<String, dynamic> c) {
+    if (c['citation_apa'] != null && (c['citation_apa'] as String).isNotEmpty) return 'APA';
+    if (c['citation_mla'] != null && (c['citation_mla'] as String).isNotEmpty) return 'MLA';
+    if (c['citation_ieee'] != null && (c['citation_ieee'] as String).isNotEmpty) return 'IEEE';
+    if (c['citation_harvard'] != null && (c['citation_harvard'] as String).isNotEmpty) return 'HARVARD';
+    if (c['citation_chicago'] != null && (c['citation_chicago'] as String).isNotEmpty) return 'CHICAGO';
+    final style = c['style'] as String?;
+    if (style != null && style.isNotEmpty) return style.toUpperCase();
+    return 'APA';
   }
 
   @override
@@ -324,10 +396,14 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '$_selectedStyle Formatted Citation',
-                          style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                        Flexible(
+                          child: Text(
+                            '$_selectedStyle Formatted Citation',
+                            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
@@ -397,115 +473,213 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
   }
 
   Widget _buildSavedLibraryTab() {
+    final currentAuthUser = Supabase.instance.client.auth.currentUser;
+    final realUserId = currentAuthUser?.id;
+
+    // Unauthenticated state
+    if (realUserId == null || !_isValidUuid(realUserId)) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySurface,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_outline_rounded, size: 48, color: AppColors.primary),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Sign in to view your saved citations',
+                style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Create an account or sign in to save your generated citations, build bibliographies, and access them across sessions.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary, height: 1.5),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () => context.push('/auth/login'),
+                icon: const Icon(Icons.login_rounded, size: 18),
+                label: const Text('Sign In'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final citationsAsync = ref.watch(savedCitationsProvider);
 
     return citationsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error loading citations: $e')),
+      loading: () => const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+      error: (e, stack) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textTertiary),
+              const SizedBox(height: 16),
+              Text(
+                'Unable to load saved citations. Please try again.',
+                textAlign: TextAlign.center,
+                style: AppTypography.titleSmall.copyWith(color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => ref.invalidate(savedCitationsProvider),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Retry'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       data: (citations) {
         if (citations.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.format_quote_rounded, size: 64, color: AppColors.textTertiary),
-                  const SizedBox(height: 16),
-                  Text('No Saved Citations', style: AppTypography.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Generate citations and tap "Save to Library" to build your bibliography.',
-                    textAlign: TextAlign.center,
-                    style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary),
-                  ),
-                ],
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(savedCitationsProvider),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Container(
+                height: MediaQuery.of(context).size.height * 0.6,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.format_quote_rounded, size: 64, color: AppColors.textTertiary),
+                    const SizedBox(height: 16),
+                    Text('No Saved Citations', style: AppTypography.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Generate citations and tap "Save to Library" to build your bibliography.',
+                      textAlign: TextAlign.center,
+                      style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(24),
-          itemCount: citations.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(savedCitationsProvider),
+          child: ListView.builder(
+            padding: const EdgeInsets.all(24),
+            itemCount: citations.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Bibliography (${citations.length})',
+                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          final fullBib = citations.map((c) => _extractCitationText(c)).where((s) => s.isNotEmpty).join('\n\n');
+                          _copyToClipboard(fullBib);
+                        },
+                        icon: const Icon(Icons.copy_all_rounded, size: 16),
+                        label: const Text('Copy All'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final c = citations[index - 1];
+              final citText = _extractCitationText(c);
+              final style = _extractCitationStyle(c);
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.borderLight),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Bibliography (${citations.length})',
-                      style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w700),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySurface,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(style, style: AppTypography.labelSmall.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded, color: AppColors.riskCritical, size: 18),
+                          onPressed: () async {
+                            final id = c['id']?.toString();
+                            if (id == null) return;
+                            try {
+                              await Supabase.instance.client
+                                  .from('citations')
+                                  .delete()
+                                  .eq('id', id)
+                                  .eq('user_id', realUserId);
+                              ref.invalidate(savedCitationsProvider);
+                              if (context.mounted) {
+                                AppSnackbar.showSuccess(context, 'Citation deleted');
+                              }
+                            } catch (err) {
+                              if (context.mounted) {
+                                AppSnackbar.showError(context, AppErrorMapper.toUserFriendlyMessage(err, defaultAction: 'delete citation'));
+                              }
+                            }
+                          },
+                        ),
+                      ],
                     ),
-                    TextButton.icon(
-                      onPressed: () {
-                        final fullBib = citations.map((c) => c['formatted_citation'] as String? ?? '').where((s) => s.isNotEmpty).join('\n\n');
-                        _copyToClipboard(fullBib);
-                      },
-                      icon: const Icon(Icons.copy_all_rounded, size: 16),
-                      label: const Text('Copy All'),
+                    const SizedBox(height: 8),
+                    SelectableText(citText, style: AppTypography.bodySmall.copyWith(height: 1.5)),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => _copyToClipboard(citText),
+                        icon: const Icon(Icons.copy_rounded, size: 14),
+                        label: const Text('Copy'),
+                      ),
                     ),
                   ],
                 ),
               );
-            }
-
-            final c = citations[index - 1];
-            final citText = c['formatted_citation'] as String? ?? c['title'] as String? ?? '';
-            final style = (c['style'] as String? ?? 'apa').toUpperCase();
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.borderLight),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: AppColors.primarySurface,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(style, style: AppTypography.labelSmall.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.riskCritical, size: 18),
-                        onPressed: () async {
-                          final id = c['id'] as String;
-                          await Supabase.instance.client.from('citations').delete().eq('id', id);
-                          ref.invalidate(savedCitationsProvider);
-                          if (context.mounted) {
-                            AppSnackbar.showSuccess(context, 'Citation deleted');
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SelectableText(citText, style: AppTypography.bodySmall.copyWith(height: 1.5)),
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () => _copyToClipboard(citText),
-                      icon: const Icon(Icons.copy_rounded, size: 14),
-                      label: const Text('Copy'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
+            },
+          ),
         );
       },
     );
@@ -520,11 +694,25 @@ class _CitationScreenState extends ConsumerState<CitationScreen> with SingleTick
   }) {
     return TextFormField(
       controller: controller,
-      decoration: InputDecoration(
-        labelText: label + (isOptional ? ' (Optional)' : ''),
-        prefixIcon: Icon(icon),
-      ),
       validator: validator,
+      decoration: InputDecoration(
+        labelText: isOptional ? '$label (Optional)' : label,
+        prefixIcon: Icon(icon, color: AppColors.textSecondary, size: 20),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.borderLight),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.borderLight),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+        ),
+        filled: true,
+        fillColor: AppColors.surface,
+      ),
       style: AppTypography.bodyMedium,
     );
   }

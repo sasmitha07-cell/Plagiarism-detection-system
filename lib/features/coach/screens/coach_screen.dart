@@ -12,6 +12,7 @@ import '../models/coach_message.dart';
 import '../providers/coach_chat_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../home/providers/home_provider.dart';
+import '../../../core/utils/error_mapper.dart';
 
 class CoachScreen extends ConsumerStatefulWidget {
   final String? scanId;
@@ -93,7 +94,7 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
     } catch (e) {
       if (mounted) {
         setState(() => _isAnalyzingLive = false);
-        AppSnackbar.showError(context, 'Analysis error: $e');
+        AppSnackbar.showError(context, AppErrorMapper.toUserFriendlyMessage(e, defaultAction: 'analyze writing'));
       }
     }
   }
@@ -191,6 +192,7 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
           indicatorColor: AppColors.primary,
           indicatorWeight: 3,
           isScrollable: true,
+          tabAlignment: TabAlignment.start,
           labelStyle: AppTypography.labelMedium.copyWith(fontWeight: FontWeight.w700),
           tabs: const [
             Tab(icon: Icon(Icons.auto_awesome_rounded, size: 18), text: 'Live Editor'),
@@ -400,7 +402,7 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
 
   Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
@@ -411,9 +413,19 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(height: 8),
-          Text(value, style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          Text(
+            value,
+            style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 2),
-          Text(title, style: AppTypography.labelSmall.copyWith(color: AppColors.textTertiary)),
+          Text(
+            title,
+            style: AppTypography.labelSmall.copyWith(color: AppColors.textTertiary),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
@@ -959,8 +971,8 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
       return Align(
         alignment: Alignment.centerLeft,
         child: Container(
-          margin: const EdgeInsets.only(bottom: 16, right: 48),
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 16, right: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(18).copyWith(bottomLeft: Radius.zero),
@@ -971,7 +983,12 @@ class _CoachScreenState extends ConsumerState<CoachScreen> with SingleTickerProv
             children: [
               const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary)),
               const SizedBox(width: 12),
-              Text('Coach is reviewing your draft against academic criteria…', style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary)),
+              Flexible(
+                child: Text(
+                  'Coach is reviewing your draft against academic criteria…',
+                  style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary),
+                ),
+              ),
             ],
           ),
         ),

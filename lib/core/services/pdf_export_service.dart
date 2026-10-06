@@ -108,18 +108,7 @@ class PdfExportService {
               pw.SizedBox(height: 24),
             ],
             _buildSectionTitle('Full Document Text'),
-            pw.Container(
-              padding: const pw.EdgeInsets.all(12),
-              decoration: pw.BoxDecoration(
-                color: PdfColors.grey50,
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                border: pw.Border.all(color: PdfColors.grey200),
-              ),
-              child: pw.Text(
-                content,
-                style: const pw.TextStyle(fontSize: 9, lineSpacing: 1.6, color: PdfColors.grey900),
-              ),
-            ),
+            ..._buildSpanningDocumentContent(content),
           ];
         },
       ),
@@ -353,7 +342,12 @@ class PdfExportService {
             ],
           ),
           pw.SizedBox(height: 4),
-          pw.Text('"${item.flaggedText}"', style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic)),
+          pw.Text(
+            item.flaggedText.length > 500
+                ? '"${item.flaggedText.substring(0, 500)}..."'
+                : '"${item.flaggedText}"',
+            style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
+          ),
           if (item.explanation != null && item.explanation!.isNotEmpty) ...[
             pw.SizedBox(height: 4),
             pw.Text('Why Flagged: ${item.explanation}', style: pw.TextStyle(fontSize: 7, color: PdfColors.grey700)),
@@ -361,6 +355,61 @@ class PdfExportService {
         ],
       ),
     );
+  }
+
+  List<pw.Widget> _buildSpanningDocumentContent(String text) {
+    final clean = text.trim();
+    if (clean.isEmpty) {
+      return [
+        pw.Paragraph(
+          text: '(Empty Document Content)',
+          style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+        )
+      ];
+    }
+
+    final rawParagraphs = clean.split(RegExp(r'\r?\n\r?\n|\r?\n'));
+    final List<pw.Widget> widgets = [];
+
+    for (final p in rawParagraphs) {
+      final trimmed = p.trim();
+      if (trimmed.isEmpty) continue;
+
+      // Ensure that even extremely long unbroken blocks (e.g. 5000+ characters without newlines)
+      // are chunked into 1500-char paragraphs so pw.Paragraph can flow across page breaks effortlessly
+      if (trimmed.length > 1500) {
+        var start = 0;
+        while (start < trimmed.length) {
+          final end = (start + 1500 < trimmed.length) ? start + 1500 : trimmed.length;
+          widgets.add(
+            pw.Paragraph(
+              text: trimmed.substring(start, end),
+              style: const pw.TextStyle(
+                fontSize: 9,
+                lineSpacing: 1.5,
+                color: PdfColors.grey900,
+              ),
+              margin: const pw.EdgeInsets.only(bottom: 6),
+            ),
+          );
+          start = end;
+        }
+      } else {
+        widgets.add(
+          pw.Paragraph(
+            text: trimmed,
+            style: const pw.TextStyle(
+              fontSize: 9,
+              lineSpacing: 1.5,
+              color: PdfColors.grey900,
+            ),
+            margin: const pw.EdgeInsets.only(bottom: 6),
+          ),
+        );
+      }
+    }
+
+    return widgets;
   }
 
   // Legacy method for backward compatibility

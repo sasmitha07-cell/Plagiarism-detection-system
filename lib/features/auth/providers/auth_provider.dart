@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/models/user_profile.dart';
@@ -35,8 +36,10 @@ final passwordRecoveryProvider = StreamProvider<bool>((ref) {
   );
 });
 
-// Current user ID
+// Current user ID (reactive to auth changes)
 final currentUserIdProvider = Provider<String?>((ref) {
+  final authUser = ref.watch(authStateProvider).asData?.value;
+  if (authUser != null) return authUser.id;
   final currentUser = Supabase.instance.client.auth.currentUser;
   if (currentUser != null) return currentUser.id;
   return AuthRepository.isDemoUserActive ? _demoUserId : null;
@@ -159,23 +162,9 @@ UserProfile? _getFallbackProfile(String userId) {
   return null;
 }
 
-// Profile provider
+// Reactive Profile provider
 final userProfileProvider = FutureProvider<UserProfile?>((ref) async {
-  final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) return null;
-
-  try {
-    final data = await Supabase.instance.client
-        .from('profiles')
-        .select()
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (data == null) return _getFallbackProfile(userId);
-    return UserProfile.fromJson(data);
-  } catch (e) {
-    return _getFallbackProfile(userId);
-  }
+  return ref.watch(profileStateProvider).asData?.value;
 });
 
 // Mutable profile state for updates
@@ -187,13 +176,17 @@ final profileStateProvider =
 class ProfileNotifier extends AsyncNotifier<UserProfile?> {
   @override
   FutureOr<UserProfile?> build() async {
-    return _fetchProfile();
-  }
-
-  Future<UserProfile?> _fetchProfile() async {
-    final userId = ref.read(currentUserIdProvider);
+    // Watching currentUserIdProvider automatically resets and reloads profile on sign-in / sign-out
+    final userId = ref.watch(currentUserIdProvider);
     if (userId == null) {
       return null;
+    }
+    return _fetchProfile(userId);
+  }
+
+  Future<UserProfile?> _fetchProfile(String userId) async {
+    if (userId == _demoUserId) {
+      return _getFallbackProfile(userId);
     }
 
     try {
@@ -203,10 +196,73 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
           .eq('id', userId)
           .maybeSingle();
 
-      if (data == null) return _getFallbackProfile(userId);
-      return UserProfile.fromJson(data);
+      if (data != null) {
+        return UserProfile.fromJson(data);
+      }
+
+      // If user profile is not yet in profiles table, bootstrap from authenticated auth.users record
+      final currentUser = Supabase.instance.client.auth.currentUser;
+      if (currentUser != null && currentUser.id == userId) {
+        final meta = currentUser.userMetadata ?? {};
+        final email = currentUser.email ?? '';
+        final initialName = meta['full_name'] as String? ??
+            (email.isNotEmpty ? email.split('@').first : 'User');
+        final initialProfile = {
+          'id': userId,
+          'email': email,
+          'full_name': initialName,
+          'institution': meta['institution'] as String?,
+          'academic_level':
+              meta['academic_level'] as String? ?? 'undergraduate',
+          'created_at': currentUser.createdAt,
+          'updated_at': DateTime.now().toIso8601String(),
+        };
+
+        try {
+          final inserted = await Supabase.instance.client
+              .from('profiles')
+              .insert(initialProfile)
+              .select()
+              .maybeSingle();
+          if (inserted != null) {
+            return UserProfile.fromJson(inserted);
+          }
+        } catch (_) {
+          // In case of concurrent insert or transient issue, query once more
+          final refetched = await Supabase.instance.client
+              .from('profiles')
+              .select()
+              .eq('id', userId)
+              .maybeSingle();
+          if (refetched != null) return UserProfile.fromJson(refetched);
+        }
+
+        return UserProfile(
+          id: currentUser.id,
+          email: email,
+          fullName: meta['full_name'] as String?,
+          institution: meta['institution'] as String?,
+          academicLevel: meta['academic_level'] as String? ?? 'undergraduate',
+          createdAt: DateTime.tryParse(currentUser.createdAt) ?? DateTime.now(),
+        );
+      }
+
+      return null;
     } catch (e) {
-      return _getFallbackProfile(userId);
+      debugPrint('[ProfileNotifier] Error fetching profile: $e');
+      final currentUser = Supabase.instance.client.auth.currentUser;
+      if (currentUser != null && currentUser.id == userId) {
+        final meta = currentUser.userMetadata ?? {};
+        return UserProfile(
+          id: currentUser.id,
+          email: currentUser.email ?? '',
+          fullName: meta['full_name'] as String?,
+          institution: meta['institution'] as String?,
+          academicLevel: meta['academic_level'] as String?,
+          createdAt: DateTime.tryParse(currentUser.createdAt) ?? DateTime.now(),
+        );
+      }
+      rethrow;
     }
   }
 
@@ -214,18 +270,87 @@ class ProfileNotifier extends AsyncNotifier<UserProfile?> {
     final userId = ref.read(currentUserIdProvider);
     if (userId == null) return;
 
-    await Supabase.instance.client
-        .from('profiles')
-        .update(updates)
-        .eq('id', userId);
+    if (userId != _demoUserId) {
+      final sanitized = Map<String, dynamic>.from(updates);
+      sanitized['updated_at'] = DateTime.now().toIso8601String();
+
+      await Supabase.instance.client
+          .from('profiles')
+          .update(sanitized)
+          .eq('id', userId);
+
+      // Keep userMetadata in sync where applicable
+      try {
+        final metaUpdates = <String, dynamic>{};
+        if (updates.containsKey('full_name')) {
+          metaUpdates['full_name'] = updates['full_name'];
+        }
+        if (updates.containsKey('institution')) {
+          metaUpdates['institution'] = updates['institution'];
+        }
+        if (updates.containsKey('academic_level')) {
+          metaUpdates['academic_level'] = updates['academic_level'];
+        }
+        if (metaUpdates.isNotEmpty) {
+          await Supabase.instance.client.auth.updateUser(
+            UserAttributes(data: metaUpdates),
+          );
+        }
+      } catch (_) {}
+    }
 
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _fetchProfile());
+    state = await AsyncValue.guard(() => _fetchProfile(userId));
+  }
+
+  Future<String?> uploadAvatar(dynamic imageFile) async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null || userId == _demoUserId) return null;
+
+    final client = Supabase.instance.client;
+    final pathStr = imageFile.path as String;
+    final ext = pathStr.split('.').last.toLowerCase();
+    final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.$ext';
+    final filePath = '$userId/$fileName';
+
+    final bytes = await imageFile.readAsBytes();
+    String mimeType = 'image/jpeg';
+    if (ext == 'png') {
+      mimeType = 'image/png';
+    } else if (ext == 'webp') {
+      mimeType = 'image/webp';
+    } else if (ext == 'gif') {
+      mimeType = 'image/gif';
+    }
+
+    await client.storage.from('avatars').uploadBinary(
+          filePath,
+          bytes,
+          fileOptions: FileOptions(
+            contentType: mimeType,
+            upsert: true,
+          ),
+        );
+
+    final publicUrl = client.storage.from('avatars').getPublicUrl(filePath);
+    final cacheBustedUrl =
+        '$publicUrl?t=${DateTime.now().millisecondsSinceEpoch}';
+
+    await updateProfile({'avatar_url': cacheBustedUrl});
+    return cacheBustedUrl;
+  }
+
+  Future<void> removeAvatar() async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return;
+    await updateProfile({'avatar_url': null});
   }
 
   Future<void> refresh() async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return;
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _fetchProfile());
+    state = await AsyncValue.guard(() => _fetchProfile(userId));
   }
 }
 

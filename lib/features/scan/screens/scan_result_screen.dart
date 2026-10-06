@@ -14,6 +14,7 @@ import '../widgets/flagged_section_card.dart';
 import '../widgets/score_gauge.dart';
 import '../widgets/document_highlight_viewer.dart';
 import '../providers/scan_provider.dart';
+import '../../../core/utils/error_mapper.dart';
 
 class ScanResultScreen extends ConsumerStatefulWidget {
   final String scanId;
@@ -91,7 +92,10 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
       }
     } catch (e) {
       if (mounted) {
-        AppSnackbar.showError(context, 'Failed to export PDF: $e');
+        AppSnackbar.showError(
+          context,
+          AppErrorMapper.getUserMessage(e, fallback: 'Failed to export PDF report. Please try again.'),
+        );
       }
     } finally {
       if (mounted) setState(() => _isExporting = false);
@@ -147,7 +151,33 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
       backgroundColor: AppColors.background,
       body: dbAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error loading scan: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textTertiary),
+                const SizedBox(height: 16),
+                Text(
+                  AppErrorMapper.toUserFriendlyMessage(e, defaultAction: 'load scan result'),
+                  textAlign: TextAlign.center,
+                  style: AppTypography.titleSmall.copyWith(color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () => ref.invalidate(scanResultProvider(widget.scanId)),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Retry'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         data: (result) => _buildContent(context, result, title),
       ),
     );
@@ -171,6 +201,18 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
     final dbFlags = result?.flaggedSections ?? [];
     final filteredFlags = _getFilteredFlags(dbFlags);
     final dbSources = result?.sources ?? [];
+    final effectiveSources = dbSources.isNotEmpty
+        ? dbSources
+        : dbFlags
+            .where((f) => f.sourceTitle != null || f.sourceUrl != null)
+            .map((f) => {
+                  'title': f.sourceTitle ?? 'Web Match',
+                  'url': f.sourceUrl ?? '',
+                  'similarity_percentage': f.similarityScore,
+                  'snippet': f.flaggedText,
+                  'domain': f.domain,
+                })
+            .toList();
     final originalScore = (100.0 - plagiarismScore).clamp(0.0, 100.0);
 
     return NestedScrollView(
@@ -219,7 +261,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
             tabs: [
               const Tab(text: 'Overview'),
               Tab(text: 'Document View (${dbFlags.length})'),
-              Tab(text: 'Sources (${dbSources.length})'),
+              Tab(text: 'Sources (${effectiveSources.length})'),
               const Tab(text: 'Writing Quality'),
             ],
           ),
@@ -246,7 +288,7 @@ class _ScanResultScreenState extends ConsumerState<ScanResultScreen> with Single
           _buildDocumentViewTab(content, dbFlags, result?.documentId),
 
           // TAB 3: SOURCES
-          _buildSourcesTab(dbSources, dbFlags),
+          _buildSourcesTab(effectiveSources, dbFlags),
 
           // TAB 4: WRITING QUALITY & COACH
           _buildWritingQualityTab(result, writingScore),

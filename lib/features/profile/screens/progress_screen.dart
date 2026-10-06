@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -18,27 +19,70 @@ class ProgressScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Progress & Analytics'),
         backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: BackButton(color: AppColors.textPrimary),
       ),
       body: SafeArea(
         child: recentScansAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error: $e')),
+          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textTertiary),
+                  const SizedBox(height: 12),
+                  const Text('Unable to load progress data.', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () => ref.invalidate(recentScansProvider),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
           data: (scans) {
-            // Build spots from real scan history
+            if (scans.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySurface,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.insights_rounded, size: 48, color: AppColors.primary),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'No Scan Activity Yet',
+                        style: AppTypography.titleMedium.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Upload or scan your first academic document to begin tracking your writing quality and similarity progress over time.',
+                        style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            // Build spots strictly from real scan history
             final spots = <FlSpot>[];
             final reversedScans = scans.reversed.toList();
-            if (reversedScans.isNotEmpty) {
-              for (int i = 0; i < reversedScans.length; i++) {
-                final score = reversedScans[i].overallWritingScore ?? (100.0 - reversedScans[i].overallSimilarityScore);
-                spots.add(FlSpot(i.toDouble(), score.clamp(10.0, 100.0)));
-              }
-            } else {
-              spots.addAll([
-                const FlSpot(0, 65),
-                const FlSpot(1, 74),
-                const FlSpot(2, 82),
-                const FlSpot(3, 91),
-              ]);
+            for (int i = 0; i < reversedScans.length; i++) {
+              final score = reversedScans[i].overallWritingScore ??
+                  (100.0 - reversedScans[i].overallSimilarityScore);
+              spots.add(FlSpot(i.toDouble(), score.clamp(0.0, 100.0)));
             }
 
             int exactCount = 0;
@@ -52,6 +96,8 @@ class ProgressScreen extends ConsumerWidget {
               if (s.aiGeneratedScore > 20) aiCount++;
               if (s.overallSimilarityScore < 15) cleanCount++;
             }
+
+            final maxBar = [exactCount, semanticCount, aiCount, cleanCount, 3].reduce(max).toDouble() + 1.0;
 
             return SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -82,9 +128,21 @@ class ProgressScreen extends ConsumerWidget {
                     ),
                     child: LineChart(
                       LineChartData(
+                        minY: 0,
+                        maxY: 100,
                         gridData: const FlGridData(show: false),
                         titlesData: FlTitlesData(
-                          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 32,
+                              interval: 25,
+                              getTitlesWidget: (val, _) => Text(
+                                '${val.toInt()}',
+                                style: const TextStyle(fontSize: 10, color: AppColors.textTertiary),
+                              ),
+                            ),
+                          ),
                           rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                           topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                           bottomTitles: AxisTitles(
@@ -94,7 +152,8 @@ class ProgressScreen extends ConsumerWidget {
                                 final idx = value.toInt();
                                 if (idx == 0) return const Text('Start', style: TextStyle(fontSize: 10));
                                 if (idx == spots.length - 1) return const Text('Latest', style: TextStyle(fontSize: 10));
-                                return Text('Scan ${idx + 1}', style: const TextStyle(fontSize: 10));
+                                if (spots.length <= 6) return Text('Scan ${idx + 1}', style: const TextStyle(fontSize: 10));
+                                return const Text('');
                               },
                             ),
                           ),
@@ -103,9 +162,9 @@ class ProgressScreen extends ConsumerWidget {
                         lineBarsData: [
                           LineChartBarData(
                             spots: spots,
-                            isCurved: true,
+                            isCurved: spots.length > 1,
                             color: AppColors.primary,
-                            barWidth: 4,
+                            barWidth: 3.5,
                             isStrokeCapRound: true,
                             dotData: const FlDotData(show: true),
                             belowBarData: BarAreaData(
@@ -144,6 +203,7 @@ class ProgressScreen extends ConsumerWidget {
                     ),
                     child: BarChart(
                       BarChartData(
+                        maxY: maxBar,
                         gridData: const FlGridData(show: false),
                         titlesData: FlTitlesData(
                           leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -161,7 +221,7 @@ class ProgressScreen extends ConsumerWidget {
                                   case 2:
                                     return const Text('AI High', style: TextStyle(fontSize: 10));
                                   case 3:
-                                    return const Text('Original', style: TextStyle(fontSize: 10));
+                                    return const Text('Clean', style: TextStyle(fontSize: 10));
                                 }
                                 return const Text('');
                               },
@@ -172,7 +232,7 @@ class ProgressScreen extends ConsumerWidget {
                         barGroups: [
                           BarChartGroupData(x: 0, barRods: [
                             BarChartRodData(
-                              toY: (exactCount > 0 ? exactCount : 1).toDouble(),
+                              toY: exactCount.toDouble(),
                               color: AppColors.riskCritical,
                               width: 22,
                               borderRadius: BorderRadius.circular(4),
@@ -180,7 +240,7 @@ class ProgressScreen extends ConsumerWidget {
                           ]),
                           BarChartGroupData(x: 1, barRods: [
                             BarChartRodData(
-                              toY: (semanticCount > 0 ? semanticCount : 2).toDouble(),
+                              toY: semanticCount.toDouble(),
                               color: AppColors.riskMedium,
                               width: 22,
                               borderRadius: BorderRadius.circular(4),
@@ -188,7 +248,7 @@ class ProgressScreen extends ConsumerWidget {
                           ]),
                           BarChartGroupData(x: 2, barRods: [
                             BarChartRodData(
-                              toY: (aiCount > 0 ? aiCount : 1).toDouble(),
+                              toY: aiCount.toDouble(),
                               color: AppColors.secondary,
                               width: 22,
                               borderRadius: BorderRadius.circular(4),
@@ -196,7 +256,7 @@ class ProgressScreen extends ConsumerWidget {
                           ]),
                           BarChartGroupData(x: 3, barRods: [
                             BarChartRodData(
-                              toY: (cleanCount > 0 ? cleanCount : 3).toDouble(),
+                              toY: cleanCount.toDouble(),
                               color: AppColors.riskSafe,
                               width: 22,
                               borderRadius: BorderRadius.circular(4),
